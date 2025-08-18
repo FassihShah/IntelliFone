@@ -129,7 +129,7 @@ with st.sidebar:
 
 
 st.title("📱 Mobile Assistant")
-st.caption("Your go-to expert for mobile specs, prices, and photo analysis")
+st.caption("Your go-to expert for phones recommendation, mobile specs, prices, and photo analysis")
 
 for msg in st.session_state.messages:
     if msg["role"] == "system":

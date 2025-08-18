@@ -1,6 +1,6 @@
 from langgraph.prebuilt import create_react_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
-from tools import tools
+from .tools import tools
 
 system_prompt = """
 You are a SupervisorAgent responsible for helping users interact with mobile-related tools.
@@ -9,6 +9,7 @@ You have access to the following tools:
 1. **ImageUnderstandingAgent** - Detects brand/model from back image of phone.
 2. **PricePredictionAgent** - Predicts price for a used mobile.
 3. **SpecsFetcherAgent** - Gets full specs including new mobile market price from GSMArena.
+4. **RecommendationAgent** - Suggests mobile phones within a given budget and ranks them based on user priorities (e.g., gaming, camera, battery, display).
 
 Your responsibilities:
 - Understand the user's query and decide which tool(s) should be called.

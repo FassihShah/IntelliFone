@@ -1,6 +1,7 @@
 from services.identify_phone_from_image import search_by_image
 from services.predict_price_service import run_pipeline
-from langchain_core.tools import Tool
+from services.recommendation_service import get_recommendations, PhoneRecommendationInput
+from langchain_core.tools import Tool, StructuredTool
 from models import UsedMobile
 from typing import Any, Optional
 from dotenv import load_dotenv
@@ -16,6 +17,7 @@ client = MongoClient(MONGO_URI)
 db = client["MobileDB"]
 mobiles_collection = db["models_specs"]
 model_names_collection = db["models_names"]
+recommended_collection = db["phones"]
 
 
 
@@ -53,6 +55,27 @@ def parse_input_image_tool(x):
     if not isinstance(x, dict):
         raise ValueError(f"Expected dict, got {type(x)}")
     return x
+
+
+
+def recommendation_wrapper(input_str: str):
+    """
+    Recommend phones under a price limit based on user priority.
+    Input should be JSON string: '{"max_price": 45000, "priority": "gaming performance"}'
+    """
+    try:
+        data = json.loads(input_str)
+        max_price = data.get("max_price")
+        priority = data.get("priority")
+        
+        if not max_price or not priority:
+            raise ValueError("Both 'max_price' and 'priority' are required.")
+            
+        return get_recommendations(max_price, priority)
+    except json.JSONDecodeError:
+        raise ValueError("Input must be a valid JSON string")
+
+
 
 
 def image_understanding_wrapper(x):
@@ -155,6 +178,14 @@ def get_specs_from_db(model: str) -> Optional[dict]:
     return None
 
 
+recommendation_tool = StructuredTool(
+    name="PhoneRecommendationAgent",
+    description="Use this tool when the user asks for phone suggestions under a budget and with a priority",
+    func=get_recommendations,
+    args_schema=PhoneRecommendationInput
+)
+
+
 image_understanding_tool = Tool(
     name="ImageUnderstandingAgent",
     description="""
@@ -224,9 +255,9 @@ price_prediction_tool = Tool(
     func=lambda x: price_prediction_wrapper(x)
 )
 
-
 tools = [
     image_understanding_tool,
     price_prediction_tool,
-    model_specs_tool
+    model_specs_tool,
+    recommendation_tool
 ]
