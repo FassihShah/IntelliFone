@@ -58,25 +58,6 @@ def parse_input_image_tool(x):
 
 
 
-def recommendation_wrapper(input_str: str):
-    """
-    Recommend phones under a price limit based on user priority.
-    Input should be JSON string: '{"max_price": 45000, "priority": "gaming performance"}'
-    """
-    try:
-        data = json.loads(input_str)
-        max_price = data.get("max_price")
-        priority = data.get("priority")
-        
-        if not max_price or not priority:
-            raise ValueError("Both 'max_price' and 'priority' are required.")
-            
-        return get_recommendations(max_price, priority)
-    except json.JSONDecodeError:
-        raise ValueError("Input must be a valid JSON string")
-
-
-
 
 def image_understanding_wrapper(x):
 
