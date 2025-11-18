@@ -1,3 +1,6 @@
+# recommender_data_service.py
+
+import re
 import json
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from deep_translator import GoogleTranslator
@@ -197,6 +200,38 @@ def _process_chunked_transcript(transcript, video_title, max_length):
     print(f"Found {len(consolidated_phones)} unique phones after processing all chunks")
     return consolidated_phones
 
+
+def infer_price_range_from_title(title: str):
+    """Infer price range from video title (e.g. 20000_to_30000)."""
+    title = title.lower()
+    match = re.findall(r'(\d{2,3})k|\d{5}', title)
+
+    if not match:
+        under_match = re.search(r'under\s*(\d{2,3})k|\d{5}', title)
+        if under_match:
+            upper = int(re.sub(r'[^0-9]', '', under_match.group()))
+            return f"0_to_{upper}"
+        return None
+
+    prices = []
+    for p in match:
+        if isinstance(p, tuple):
+            p = next(filter(None, p), None)
+        if not p:
+            continue
+        if len(p) <= 3:
+            prices.append(int(p) * 1000)
+        else:
+            prices.append(int(p))
+
+    if len(prices) == 1:
+        return f"0_to_{prices[0]}"
+    elif len(prices) >= 2:
+        return f"{min(prices)}_to_{max(prices)}"
+    return None
+
+
+
 def _consolidate_duplicate_phones(phones):
     """
     Consolidate phones with similar names and merge their descriptions.
@@ -317,12 +352,18 @@ def _call_llm_and_parse(prompt):
         print(f"Error calling LLM: {e}")
         return []
 
-def process_video(video_id, title, url, price_range, uploaded_at=None):
+def process_video(video_id, title, url, price_range=None, uploaded_at=None):
     """
     Process a YouTube video: extract transcript, segment into phones, store in MongoDB.
+    Automatically infers price range if not provided.
     """
     print(f"Processing video: {title}")
-    
+
+    # 🔹 Auto-infer price range if not given
+    if not price_range:
+        price_range = infer_price_range_from_title(title)
+        print(f"💰 Inferred price range from title: {price_range}")
+
     # Get transcript
     transcript, lang = fetch_transcript(video_id)
     if not transcript:
@@ -330,7 +371,7 @@ def process_video(video_id, title, url, price_range, uploaded_at=None):
         return None
 
     print(f"✅ Retrieved transcript in {lang}")
-    
+
     # Segment transcript into phones
     phone_data = segment_transcript(transcript, title)
 
@@ -342,14 +383,13 @@ def process_video(video_id, title, url, price_range, uploaded_at=None):
         "price_range": price_range,
         "uploaded_at": uploaded_at or datetime.utcnow(),
         "original_language": lang,
-        "transcript": transcript[:1000] + "..." if len(transcript) > 1000 else transcript,  # Store truncated version
         "processed_at": datetime.utcnow()
     }
-    
+
     try:
         videos_collection.update_one(
-            {"youtube_id": video_id}, 
-            {"$set": video_doc}, 
+            {"youtube_id": video_id},
+            {"$set": video_doc},
             upsert=True
         )
         print(f"✅ Stored video metadata for {title}")
@@ -357,17 +397,17 @@ def process_video(video_id, title, url, price_range, uploaded_at=None):
         print(f"Error storing video metadata: {e}")
 
     # Store phones
-    if phone_data and isinstance(phone_data, list): 
+    if phone_data and isinstance(phone_data, list):
         for entry in phone_data:
             phone_doc = {
                 "video_id": video_id,
                 "phone_name": entry.get("phone_name", "Unknown"),
                 "description": entry.get("description", ""),
-                "price_range": entry.get("price_range"),  # This will be int or None
-                "video_price_range": price_range,  # Original video category price range
+                "price_range": entry.get("price_range"),
+                "video_price_range": price_range,  # 🔹 consistent
                 "created_at": datetime.utcnow()
             }
-            
+
             try:
                 phones_collection.update_one(
                     {"video_id": video_id, "phone_name": phone_doc["phone_name"]},
@@ -376,7 +416,7 @@ def process_video(video_id, title, url, price_range, uploaded_at=None):
                 )
             except Exception as e:
                 print(f"Error storing phone data: {e}")
-                
+
         print(f"✅ Stored {len(phone_data)} phones from video {title}")
     else:
         print("⚠️ No valid phone data extracted from transcript")
@@ -387,6 +427,5 @@ if __name__ == "__main__":
     process_video(
         video_id="clc5WoFWNyU",
         title="Best Paisa Wasool Phones for You 20k to 30k 🔥 In Box Packed Category - My Top Picks",
-        url="https://youtu.be/clc5WoFWNyU?si=B-sly8l7XLdooc2I",
-        price_range="20000_to_30000"
+        url="https://youtu.be/clc5WoFWNyU?si=B-sly8l7XLdooc2I"
     )

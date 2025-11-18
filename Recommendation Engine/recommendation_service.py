@@ -1,3 +1,5 @@
+# recommendation_service.py
+
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from langchain_google_genai import ChatGoogleGenerativeAI
