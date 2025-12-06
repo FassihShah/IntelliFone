@@ -7,7 +7,10 @@ class UsedMobile(BaseModel):
     model: Optional[str] = None
     ram: Optional[str] = None
     storage: Optional[str] = None
-    condition: Optional[int] = None
+
+    condition: Optional[int] = None               # subjective from OLX
+    condition_score: Optional[float] = None       # AI score (not used here)
+
     pta_approved: Optional[bool] = None        
 
     is_panel_changed: Optional[bool] = None
@@ -27,6 +30,7 @@ class UsedMobile(BaseModel):
     listing_source: Optional[str] = None     
     images: Optional[list[str]] = None
     post_date: Optional[str] = None
+
 
 
 class NewMobile(BaseModel):
