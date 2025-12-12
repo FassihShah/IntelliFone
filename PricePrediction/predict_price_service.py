@@ -22,18 +22,14 @@ client = MongoClient(MONGO_URI)
 db = client[DB_NAME]
 collection = db[COLLECTION_NAME]
 
-MAX_DATA_AGE_DAYS = 30
-
-
 
 def fetch_training_data(input_model: str, db: Collection = collection) -> List[UsedMobile]:
-    """Fetch recent training data from MongoDB (OLX listings)."""
-    
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=MAX_DATA_AGE_DAYS)
+    """Fetch training data from MongoDB (OLX listings).
+       TTL index already clears old data, so no age filter needed.
+    """
 
     query = {
-        "model": {"$regex": re.escape(input_model), "$options": "i"},
-        "extraction_date": {"$gte": cutoff_date}
+        "model": {"$regex": re.escape(input_model), "$options": "i"}
     }
 
     training_data = []
@@ -46,6 +42,7 @@ def fetch_training_data(input_model: str, db: Collection = collection) -> List[U
                 doc["images"] = [img.strip() for img in doc["images"].split(",") if img.strip()]
             
             training_data.append(UsedMobile(**doc))
+
         except Exception as e:
             print("Skipping record:", e)
 
@@ -53,6 +50,7 @@ def fetch_training_data(input_model: str, db: Collection = collection) -> List[U
         raise RuntimeError(f"⚠️ Only {len(training_data)} fresh records found. Need 150 minimum.")
 
     return training_data
+
 
 
 
