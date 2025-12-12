@@ -427,10 +427,10 @@ def process_video(video_id, title, url, price_range=None, uploaded_at=None):
         print("⚠️ No valid phone data extracted from transcript")
 
 
-# Example usage
-if __name__ == "__main__":
-    process_video(
-        video_id="clc5WoFWNyU",
-        title="Best Paisa Wasool Phones for You 20k to 30k 🔥 In Box Packed Category - My Top Picks",
-        url="https://youtu.be/clc5WoFWNyU?si=B-sly8l7XLdooc2I"
-    )
+# # Example usage
+# if __name__ == "__main__":
+#     process_video(
+#         video_id="clc5WoFWNyU",
+#         title="Best Paisa Wasool Phones for You 20k to 30k 🔥 In Box Packed Category - My Top Picks",
+#         url="https://youtu.be/clc5WoFWNyU?si=B-sly8l7XLdooc2I"
+#     )

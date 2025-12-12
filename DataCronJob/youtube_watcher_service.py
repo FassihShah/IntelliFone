@@ -62,24 +62,22 @@ def llm_relevance_check(title: str, description: str = "") -> bool:
     # Compose the instruction/prompt succinctly and deterministically.
     system_instruction = (
         """You are a labeler that answers only YES or NO.
-Return exactly YES or NO (uppercase) and nothing else.
+Return exactly YES or NO (uppercase), nothing else.
 
-Answer YES only if the title or description clearly shows that:
-- The video recommends or lists MULTIPLE phone models, AND
-- The phones are within a SPECIFIC price range (e.g., under 50k, between 30–40k, etc.), AND
-- The video is about “best phones” in that range — this includes category-based lists such as:
-  • Best camera phones under 50k
-  • Best gaming phones in 40–60k
-  • Best used phones under 30k
-  • Best budget phones 2025
-  • Paisa Wasool Phones 2024
-- The focus is on selecting/shortlisting phones, NOT technical feature-only analysis.
+Answer YES if the video is very likely a list-style recommendation video of smartphones, even if the title does not explicitly mention the number of phones. This includes:
+- Category-based lists (best camera phones, best gaming phones, best performance phones, best battery phones, etc.)
+- Titles with phrases like “My Choices”, “Top Picks”, “Best Smartphones”, “Best Phones for 2024/2025”, etc.
+- Videos that normally include multiple phones even when the count is not stated.
+
+Assume that any “Best ___ Phones” video typically includes 4 or more phones unless the title clearly indicates otherwise.
 
 Answer NO if:
-- The video is a single phone review, unboxing, launch, or rumor.
-- It compares only 2–3 phones (A vs B, A vs B vs C).
-- It is NOT tied to a price range.
-- It focuses only on features unrelated to picking phones (e.g., best displays, best OS, benchmarks).
+- The video reviews a single phone.
+- The video compares only 2 or 3 phones (A vs B, A vs B vs C, “Top 3 phones”, etc.).
+- The video is not about listing multiple recommended phones.
+- The video is about news, leaks, rumors, or feature explanations without listing multiple phones.
+
+If the title suggests a list but the number of phones is unclear, lean toward YES unless it explicitly states 2 or 3 phones.
 """
     )
 
