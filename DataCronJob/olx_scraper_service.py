@@ -168,6 +168,26 @@ combined_chain = combined_prompt | llm | StrOutputParser()
 # ============================================================
 last_gemini_call = 0
 
+
+SCRAPINGBEE_API_KEY = os.getenv("SCRAPINGBEE_API_KEY")
+
+def fetch(url):
+    """Proxy OLX requests through ScrapingBee to bypass blocking."""
+    api_url = (
+        f"https://app.scrapingbee.com/api/v1/"
+        f"?api_key={SCRAPINGBEE_API_KEY}"
+        f"&render_js=false"
+        f"&url={url}"
+    )
+    try:
+        response = requests.get(api_url, timeout=30)
+        return response
+    except Exception as e:
+        print("ScrapingBee fetch failed:", e)
+        return None
+
+
+
 def rate_limit_pause():
     global last_gemini_call
     now = time.time()
@@ -323,7 +343,7 @@ def get_ads_from_page(page_num, model_query, brand):
 
     scraper = requests.Session()
     scraper.headers.update(HEADERS)
-    res = scraper.get(url)
+    res = fetch(url)
     soup = BeautifulSoup(res.text, "html.parser")
 
     ads = soup.select("li[aria-label='Listing']")
@@ -344,7 +364,7 @@ def get_ads_from_page(page_num, model_query, brand):
             location = location_tag.text.strip()
             link = "https://www.olx.com.pk" + link_tag["href"]
 
-            ad_res = scraper.get(link)
+            ad_res = fetch(link)
             ad_soup = BeautifulSoup(ad_res.text, "html.parser")
 
             desc_tag = ad_soup.select_one("div[aria-label='Description'] div._7a99ad24 span")
@@ -424,4 +444,4 @@ def scrape_used_data(model: str, brand: str):
 # ============================================================
 # TEST RUN
 # ============================================================
-#scrape_used_data("Galaxy A71", "Samsung")
+scrape_used_data("Galaxy A71", "Samsung")
