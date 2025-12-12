@@ -18,6 +18,11 @@ db = client["MobileDB"]
 videos_collection = db["videos"]
 phones_collection = db["phones"]
 
+
+# Expire documents 60 days after created_at
+phones_collection.create_index("created_at", expireAfterSeconds=60 * 24 * 60 * 60)
+
+
 translator = GoogleTranslator()
 
 
