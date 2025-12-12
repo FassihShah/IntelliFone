@@ -42,7 +42,7 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 def fetch_new_videos(channel_id):
     """Fetch latest videos from a channel in the last 7 days."""
-    published_after = (datetime.utcnow() - timedelta(days=7)).isoformat("T") + "Z"
+    published_after = (datetime.utcnow() - timedelta(days=30)).isoformat("T") + "Z"
     request = youtube.search().list(
         part="snippet",
         channelId=channel_id,
