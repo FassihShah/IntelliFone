@@ -143,7 +143,7 @@
 -  **Direct Communication**: Built-in chat with sellers
 
 ### **AI/ML Capabilities**
--  **Damage Detection Module**: YOLOv8 segmentation for 3 damage classes
+-  **Damage Detection Module**: YOLOv11 segmentation for 3 damage classes
 -  **Condition Scoring Engine**: Weighted algorithm (screen: 1.0, back: 0.6, sides: 0.3)
 -  **Price Prediction Model**: Random Forest trained on OLX Pakistan data
 -  **Recommendation Engine**: LLM-powered analysis of YouTube tech reviews
@@ -284,7 +284,7 @@ cd IntelliFone
 
 ```bash
 # Navigate to web directory
-cd fyp-web
+cd web
 
 # Install dependencies
 npm install
@@ -315,8 +315,8 @@ source venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Download YOLOv8 model (if not included)
-# Place yolov8_damage.pt in models/ directory
+# Download YOLOv11 model (if not included)
+# Place best3.pt in models/ directory
 
 # Create environment file
 cp .env.example .env
@@ -368,7 +368,7 @@ GEMINI_API_KEY=your_gemini_key
 #### **Start Web Application**
 
 ```bash
-cd fyp-web
+cd web
 npm run dev
 # or
 yarn dev
@@ -409,7 +409,7 @@ python youtube_watcher_service.py
 #### **Web Application**
 
 ```bash
-cd fyp-web
+cd web
 
 # Build for production
 npm run build
@@ -460,7 +460,7 @@ gunicorn app:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind
 
 **Process:**
 1. Receives 6 images (front, back, left, right, top, bottom)
-2. Runs YOLOv8 inference on each image
+2. Runs YOLOv11 inference on each image
 3. Detects 3 damage classes:
    - **Crack**: Significant screen/body cracks
    - **Dot**: Small impact points
