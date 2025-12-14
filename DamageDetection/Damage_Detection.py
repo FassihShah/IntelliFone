@@ -9,12 +9,11 @@ from ultralytics import YOLO
 DAMAGE_MEASUREMENT = {
     "crack": "length",
     "screen_line": "length",
-    "scratch": "area",
     "dot": "area",
 }
 
 # YOLO class names (must match your trained model)
-CLASS_NAMES = ["crack", "dot", "line", "scratch"]
+CLASS_NAMES = ["crack", "dot", "line"]
 
 # Sides of the phone
 SIDES = ["front", "back", "left", "right", "top", "bottom"]
@@ -84,9 +83,9 @@ def analyze_phone_images(model_path, side_images, show_output=True, save_output=
 
 # Example usage
 if __name__ == "__main__":
-    model_path = "best2.pt"
+    model_path = "best3.pt"
     images = {
-        "front": "test3.png",
+        "front": "front.jpg",
         "back": "",
         "left": "",
         "right": "",

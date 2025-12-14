@@ -10,11 +10,14 @@ from bson import ObjectId
 import os
 import time
 import json
+import re
 
 from models import UsedMobile
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
+
 
 load_dotenv()
 
@@ -34,7 +37,12 @@ db[COLLECTION_NAME].create_index([("extraction_date", 1)], expireAfterSeconds=51
 
 
 # LLM Setup
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+llm = ChatOpenAI(
+    model="gpt-4o-mini",
+    temperature=0,
+    max_tokens=1500
+)
+
 
 # ============================================================
 # COMBINED MULTI-TASK PROMPT (Model Check + Extraction)
@@ -133,9 +141,8 @@ PTA RULE:
   "non PTA", "PTA not approved", "SIM lock", "JV phone"
 
 Condition rating (1–10) based ONLY on tone.  
+It must not be null.
 Ignore technical issues in rating.
-
-If unsure → use null.
 
 ============================================================================
 ### OUTPUT RULES
@@ -201,32 +208,33 @@ def rate_limit_pause():
 
 
 
+
 def sanitize_llm_json(raw_json: str):
     """
     Cleans LLM output before JSON parsing.
     Fixes:
     - Markdown code fences (```json ... ```)
     - Leading/trailing backticks
-    - RAM returned as int
-    - Storage returned as int
-    - Condition returned as float
+    - RAM returned as int/float
+    - Storage returned as int/float
+    - Condition returned as float/string
+    - Price returned as string with currency symbols
     """
 
-    # 1️⃣ Remove any markdown code fences
+    # Remove any markdown code fences
     raw_json = raw_json.strip()
     if raw_json.startswith("```"):
-        # Remove ```json or ``` and ending ```
         raw_json = raw_json.strip("`")
         raw_json = raw_json.replace("json", "", 1).strip()
 
-    # 2️⃣ Remove accidental triple or double backticks
+    # Remove accidental triple or double backticks
     raw_json = raw_json.replace("```", "")
     raw_json = raw_json.replace("``", "")
 
-    # 3️⃣ Remove stray backticks anywhere
+    # 3Remove stray backticks anywhere
     raw_json = raw_json.replace("`", "")
 
-    # 4️⃣ Parse cleaned JSON
+    # Parse cleaned JSON
     try:
         data = json.loads(raw_json)
     except Exception as e:
@@ -245,17 +253,33 @@ def sanitize_llm_json(raw_json: str):
     elif isinstance(data.get("storage"), float):
         data["storage"] = f"{int(data['storage'])}GB"
 
-    # Fix Condition (integer only)
+
+    # Fix Condition (1–10 integer)
     if isinstance(data.get("condition"), float):
         data["condition"] = round(data["condition"])
     elif isinstance(data.get("condition"), str):
-        # If LLM outputs "8.5" as string
         try:
             data["condition"] = round(float(data["condition"]))
         except:
             data["condition"] = None
 
+
+    # Fix Price
+    price = data.get("price")
+
+    if isinstance(price, str):
+        # Remove currency symbols, commas, text
+        cleaned = re.sub(r"[^\d]", "", price)
+        data["price"] = int(cleaned) if cleaned else None
+    elif isinstance(price, float):
+        data["price"] = int(price)
+    elif isinstance(price, int):
+        data["price"] = price
+    else:
+        data["price"] = None
+
     return json.dumps(data)
+
 
 
 
@@ -343,7 +367,8 @@ def get_ads_from_page(page_num, model_query, brand):
 
     scraper = requests.Session()
     scraper.headers.update(HEADERS)
-    res = fetch(url)
+    #res = fetch(url)
+    res = scraper.get(url)
     soup = BeautifulSoup(res.text, "html.parser")
 
     ads = soup.select("li[aria-label='Listing']")
@@ -364,7 +389,8 @@ def get_ads_from_page(page_num, model_query, brand):
             location = location_tag.text.strip()
             link = "https://www.olx.com.pk" + link_tag["href"]
 
-            ad_res = fetch(link)
+            #ad_res = fetch(link)
+            ad_res = scraper.get(link)
             ad_soup = BeautifulSoup(ad_res.text, "html.parser")
 
             desc_tag = ad_soup.select_one("div[aria-label='Description'] div._7a99ad24 span")
@@ -444,4 +470,4 @@ def scrape_used_data(model: str, brand: str):
 # ============================================================
 # TEST RUN
 # ============================================================
-scrape_used_data("Galaxy A71", "Samsung")
+scrape_used_data("Pixel 6A", "Google")
