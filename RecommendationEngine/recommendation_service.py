@@ -17,6 +17,7 @@ recommended_collection = db["phones"]
 
 model = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
+    api_key=os.getenv("GOOGLE_API_KEY")
 )
 
 
@@ -57,6 +58,25 @@ Instructions:
 2. For each ranked phone, explain why it is a good (or not so good) match.
 3. If no phone exactly matches the priority, recommend phones with generally good specs and justify why they are still strong alternatives.
 4. Provide the final ranked list in a clear, user-friendly format.
+Always use the currency Rs instead of writing symbol ₹.
+
+Format prices like this: ₹70,000, ₹80,000 (with commas).
+
+use -> for headings.
+
+Use **bold text** for phone names, prices, and key points.
+
+Use *italic text* only for emphasis, not headings.
+
+Present lists  numbered lists where appropriate.
+
+Ensure consistent spacing and clean line breaks between sections.
+
+Do not use * .
+
+Avoid emojis; keep the tone professional and informative.
+
+Keep explanations concise and structured in short paragraphs.
 """
 
 

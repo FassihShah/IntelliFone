@@ -1,7 +1,10 @@
 .env
-*.pt
+best1.pt
+best2.pt
 *.jpg
 *.jpeg
 *.png
 test.py
 __pycache__
+app.py
+*.pdf

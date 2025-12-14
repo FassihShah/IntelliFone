@@ -1,230 +1,249 @@
-from fastapi import FastAPI, UploadFile, File, Form
-from typing import List, Optional
-import os
-import shutil
-import uuid
+import streamlit as st
+import requests
+import json
 
-# --- Import your modules ---
-from models import UsedMobile
-from DamageDetection.Damage_Detection import analyze_phone_images
-from ConditionScoring.condition_scoring import compute_condition_score
-from PricePrediction.predict_price_service import run_pipeline
-from RecommendationEngine.recommendation_service import get_recommendations
-             
+FASTAPI_BASE_URL = "http://localhost:8000"
 
-app = FastAPI(title="IntelliFone AI Backend")
-
+st.set_page_config(page_title="IntelliFone AI", layout="wide")
+st.title("📱 IntelliFone AI Dashboard")
 
 # ============================================================
-#  ENDPOINT 1 — DAMAGE DETECTION
+# Sidebar Navigation
 # ============================================================
-@app.post("/damage-detection/")
-async def damage_detection(
-    front: Optional[UploadFile] = File(None),
-    back: Optional[UploadFile] = File(None),
-    left: Optional[UploadFile] = File(None),
-    right: Optional[UploadFile] = File(None),
-    top: Optional[UploadFile] = File(None),
-    bottom: Optional[UploadFile] = File(None),
-):
-    images = {
-        "front": front,
-        "back": back,
-        "left": left,
-        "right": right,
-        "top": top,
-        "bottom": bottom
-    }
-
-    saved = {}
-
-    os.makedirs("uploads", exist_ok=True)
-
-    # Save all uploaded images
-    for side, file in images.items():
-        if file:
-            file_id = f"{uuid.uuid4()}.jpg"
-            file_path = os.path.join("uploads", file_id)
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-            saved[side] = file_path
-        else:
-            saved[side] = None
-
-    # Run YOLO model
-    model_path = os.path.join(os.path.dirname(__file__), "best2.pt")
-    result = analyze_phone_images(model_path, saved, show_output=False, save_output=False)
-
-    return result
-
-
+menu = st.sidebar.radio(
+    "Select Module",
+    [
+        "Damage Detection (Report / JSON)",
+        "Condition Scoring",
+        "Price Prediction",
+        "Full Verification",
+        "Phone Recommendation"
+    ]
+)
 
 # ============================================================
-#  ENDPOINT 2 — CONDITION SCORING
+# 1. DAMAGE DETECTION (DIRECT IMAGE UPLOAD)
 # ============================================================
-@app.post("/condition-scoring/")
-async def condition_scoring(damage_json: dict):
-    result = compute_condition_score(damage_json)
-    return result
+if menu == "Damage Detection (Report / JSON)":
 
+    st.header("📸 Damage Detection")
 
-
-# ============================================================
-#  ENDPOINT 3 — PRICE PREDICTION (AI + USER FALLBACK)
-# ============================================================
-@app.post("/price-prediction/")
-async def price_prediction(
-    brand: Optional[str] = Form(None),
-    model: Optional[str] = Form(None),
-    ram: Optional[str] = Form(None),
-    storage: Optional[str] = Form(None),
-    condition_score: float = Form(...),
-
-    # User fallback fields
-    is_panel_changed: bool = Form(False),
-    screen_crack: bool = Form(False),
-    panel_dot: bool = Form(False),
-    panel_line: bool = Form(False),
-    panel_shade: bool = Form(False),
-    camera_lens_ok: bool = Form(True),
-    fingerprint_ok: bool = Form(True),
-    pta_approved: bool = Form(True),
-
-    ai_screen_crack: bool = Form(False),
-    ai_panel_dot: bool = Form(False),
-    ai_panel_line: bool = Form(False)
-):
-    ai_flags = {
-        "screen_crack": ai_screen_crack,
-        "panel_dot": ai_panel_dot,
-        "panel_line": ai_panel_line
-    }
-
-    mobile = UsedMobile(
-        brand=brand,
-        model=model,
-        ram=ram,
-        storage=storage,
-        condition_score=condition_score,
-
-        is_panel_changed=is_panel_changed,
-        screen_crack=screen_crack,
-        panel_dot=panel_dot,
-        panel_line=panel_line,
-        panel_shade=panel_shade,
-        camera_lens_ok=camera_lens_ok,
-        fingerprint_ok=fingerprint_ok,
-        pta_approved=pta_approved
+    mode = st.radio(
+        "Select Output Type",
+        ["PDF Damage Report", "Raw Damage JSON"]
     )
 
-    price_range = run_pipeline(mobile, ai_flags)
+    st.subheader("Upload Phone Images (Any 1–6)")
 
-    return price_range
+    col1, col2, col3 = st.columns(3)
 
+    with col1:
+        front = st.file_uploader("Front", type=["jpg", "png"])
+        back = st.file_uploader("Back", type=["jpg", "png"])
 
+    with col2:
+        left = st.file_uploader("Left", type=["jpg", "png"])
+        right = st.file_uploader("Right", type=["jpg", "png"])
 
-# ============================================================
-#  ENDPOINT 4 — FULL VERIFICATION PIPELINE
-# ============================================================
-@app.post("/full-verification/")
-async def full_verification(
-    brand: str = Form(...),
-    model: str = Form(...),
-    ram: str = Form(...),
-    storage: str = Form(...),
+    with col3:
+        top = st.file_uploader("Top", type=["jpg", "png"])
+        bottom = st.file_uploader("Bottom", type=["jpg", "png"])
 
-    # User fallback inputs
-    is_panel_changed: bool = Form(False),
-    screen_crack: bool = Form(False),
-    panel_dot: bool = Form(False),
-    panel_line: bool = Form(False),
-    panel_shade: bool = Form(False),
-    camera_lens_ok: bool = Form(True),
-    fingerprint_ok: bool = Form(True),
-    pta_approved: bool = Form(True),
+    if st.button("Analyze Damage"):
 
-    # Images
-    front: Optional[UploadFile] = File(None),
-    back: Optional[UploadFile] = File(None),
-    left: Optional[UploadFile] = File(None),
-    right: Optional[UploadFile] = File(None),
-    top: Optional[UploadFile] = File(None),
-    bottom: Optional[UploadFile] = File(None),
-):
-    # -------------------------------
-    # Save images
-    # -------------------------------
-    uploads = {}
-    os.makedirs("uploads", exist_ok=True)
+        files = {}
 
-    for side, img in {
-        "front": front, "back": back, "left": left,
-        "right": right, "top": top, "bottom": bottom
-    }.items():
-        if img:
-            file_id = f"{uuid.uuid4()}.jpg"
-            file_path = f"uploads/{file_id}"
-            with open(file_path, "wb") as f:
-                shutil.copyfileobj(img.file, f)
-            uploads[side] = file_path
+        for name, file in {
+            "front": front,
+            "back": back,
+            "left": left,
+            "right": right,
+            "top": top,
+            "bottom": bottom
+        }.items():
+            if file:
+                files[name] = file
+
+        if not files:
+            st.error("Please upload at least one image.")
         else:
-            uploads[side] = None
+            response = requests.post(
+                f"{FASTAPI_BASE_URL}/damage-detection/",
+                files=files
+            )
 
-    # -------------------------------
-    # Run YOLO Damage Detection
-    # -------------------------------
-    model_path = os.path.join(os.path.dirname(__file__), "best2.pt")
-    damage_result = analyze_phone_images(model_path, uploads, show_output=False, save_output=False)
+            if response.status_code == 200:
 
-    # -------------------------------
-    # Condition Scoring
-    # -------------------------------
-    scoring = compute_condition_score(damage_result)
-    ai_flags = scoring["ai_detected"]
-    condition_score = scoring["condition_score"]
+                if mode == "PDF Damage Report":
+                    st.success("Damage report generated")
 
-    # -------------------------------
-    # Build UsedMobile object
-    # -------------------------------
-    mobile = UsedMobile(
-        brand=brand,
-        model=model,
-        ram=ram,
-        storage=storage,
-        condition_score=condition_score,
-        is_panel_changed=is_panel_changed,
-        screen_crack=screen_crack,
-        panel_dot=panel_dot,
-        panel_line=panel_line,
-        panel_shade=panel_shade,
-        camera_lens_ok=camera_lens_ok,
-        fingerprint_ok=fingerprint_ok,
-        pta_approved=pta_approved,
-        images=list(uploads.values())
+                    st.download_button(
+                        "Download Damage Report",
+                        data=response.content,
+                        file_name="damage_report.pdf",
+                        mime="application/pdf"
+                    )
+
+                    st.info("Raw Damage Data")
+                    st.json(response.headers.get("X-Damage-Results"))
+
+                else:
+                    st.success("Damage analysis completed")
+                    st.json(response.headers.get("X-Damage-Results"))
+
+            else:
+                st.error(response.text)
+
+# ============================================================
+# 2. CONDITION SCORING
+# ============================================================
+elif menu == "Condition Scoring":
+
+    st.header("📊 Condition Scoring")
+
+    st.subheader("Paste Damage JSON")
+    damage_json = st.text_area("Damage JSON", height=250)
+
+    if st.button("Compute Condition Score"):
+        try:
+            parsed_json = json.loads(damage_json)
+
+            response = requests.post(
+                f"{FASTAPI_BASE_URL}/condition-scoring/",
+                json=parsed_json
+            )
+
+            if response.status_code == 200:
+                st.success("Condition score calculated")
+                st.json(response.json())
+            else:
+                st.error(response.text)
+
+        except json.JSONDecodeError:
+            st.error("Invalid JSON format")
+
+# ============================================================
+# 3. PRICE PREDICTION
+# ============================================================
+elif menu == "Price Prediction":
+
+    st.header("💰 Price Prediction")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        brand = st.text_input("Brand")
+        model = st.text_input("Model")
+        ram = st.text_input("RAM")
+        storage = st.text_input("Storage")
+        condition_score = st.number_input("Condition Score", 0.0, 20.0, 15.0)
+
+    with col2:
+        pta_approved = st.checkbox("PTA Approved", True)
+        camera_lens_ok = st.checkbox("Camera OK", True)
+        fingerprint_ok = st.checkbox("Fingerprint OK", True)
+        screen_crack = st.checkbox("Screen Crack")
+
+    if st.button("Predict Price"):
+        data = {
+            "brand": brand,
+            "model": model,
+            "ram": ram,
+            "storage": storage,
+            "condition_score": condition_score,
+            "pta_approved": pta_approved,
+            "camera_lens_ok": camera_lens_ok,
+            "fingerprint_ok": fingerprint_ok,
+            "screen_crack": screen_crack
+        }
+
+        response = requests.post(
+            f"{FASTAPI_BASE_URL}/price-prediction/",
+            data=data
+        )
+
+        if response.status_code == 200:
+            st.success("Price predicted")
+            st.json(response.json())
+        else:
+            st.error(response.text)
+
+# ============================================================
+# 4. FULL VERIFICATION
+# ============================================================
+elif menu == "Full Verification":
+
+    st.header("🔁 Full Phone Verification")
+
+    brand = st.text_input("Brand")
+    model = st.text_input("Model")
+    ram = st.text_input("RAM")
+    storage = st.text_input("Storage")
+
+    st.subheader("Upload Phone Images")
+    front = st.file_uploader("Front", type=["jpg", "png"])
+    back = st.file_uploader("Back", type=["jpg", "png"])
+    left = st.file_uploader("Left", type=["jpg", "png"])
+    right = st.file_uploader("Right", type=["jpg", "png"])
+    top = st.file_uploader("Top", type=["jpg", "png"])
+    bottom = st.file_uploader("Bottom", type=["jpg", "png"])
+
+    if st.button("Run Full Verification"):
+        files = {}
+        for name, file in {
+            "front": front,
+            "back": back,
+            "left": left,
+            "right": right,
+            "top": top,
+            "bottom": bottom
+        }.items():
+            if file:
+                files[name] = file
+
+        data = {
+            "brand": brand,
+            "model": model,
+            "ram": ram,
+            "storage": storage
+        }
+
+        response = requests.post(
+            f"{FASTAPI_BASE_URL}/full-verification/",
+            data=data,
+            files=files
+        )
+
+        if response.status_code == 200:
+            st.success("Verification completed")
+            st.json(response.json())
+        else:
+            st.error(response.text)
+
+# ============================================================
+# 5. RECOMMENDATION ENGINE
+# ============================================================
+elif menu == "Phone Recommendation":
+
+    st.header("🤖 Phone Recommendations")
+
+    max_price = st.number_input("Max Price (PKR)", 10000, 500000, 50000)
+    priority = st.selectbox(
+        "Priority",
+        ["camera", "gaming", "battery", "performance", "display"]
     )
 
-    # -------------------------------
-    # Price Prediction
-    # -------------------------------
-    price_range = run_pipeline(mobile, ai_flags)
+    if st.button("Get Recommendations"):
+        response = requests.get(
+            f"{FASTAPI_BASE_URL}/recommend/",
+            params={
+                "max_price": max_price,
+                "priority": priority
+            }
+        )
 
-    # -------------------------------
-    # Final Output
-    # -------------------------------
-    return {
-        "damage_detection": damage_result,
-        "condition_score": condition_score,
-        "ai_flags": ai_flags,
-        "price_range": price_range,
-        "mobile_info": mobile.model_dump(),
-        "uploaded_images": uploads
-    }
-
-
-
-# ============================================================
-#  ENDPOINT 5 — PHONE RECOMMENDATIONS
-# ============================================================
-@app.get("/recommend/")
-async def recommend_phones(max_price: float, priority: str):
-    return get_recommendations(max_price, priority)
+        if response.status_code == 200:
+            st.success("Recommendations found")
+            st.json(response.json())
+        else:
+            st.error(response.text)
