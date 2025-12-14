@@ -15,7 +15,6 @@ CLASS_SEVERITY = {
     "crack": 8,
     "line": 7,
     "dot": 6,
-    "scratch": 2
 }
 
 # Scale factor for normalization (controls overall harshness)
@@ -35,8 +34,7 @@ def compute_condition_score(damage_data):
     ai_flags = {
         "screen_crack": False,
         "panel_dot": False,
-        "panel_line": False,
-        "panel_scratch": False
+        "panel_line": False
     }
 
     # Process all detections
@@ -54,8 +52,6 @@ def compute_condition_score(damage_data):
                 ai_flags["panel_dot"] = True
             if cls == "line":
                 ai_flags["panel_line"] = True
-            if cls == "scratch":
-                ai_flags["panel_scratch"] = True
 
             # Severity + magnitude scoring
             severity = CLASS_SEVERITY.get(cls, 5)

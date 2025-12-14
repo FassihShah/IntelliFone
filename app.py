@@ -8,7 +8,7 @@ import uuid
 from models import UsedMobile
 from DamageDetection.Damage_Detection import analyze_phone_images
 from ConditionScoring.condition_scoring import compute_condition_score
-from PricePrediction.predict_price_service import run_pipeline, merge_ai_user_flags
+from PricePrediction.predict_price_service import run_pipeline
 from RecommendationEngine.recommendation_service import get_recommendations
              
 
