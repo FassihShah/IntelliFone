@@ -163,7 +163,7 @@
 ```
 intellifone/
 │
-├── fyp-web/                                    # Next.js Web Application
+├── web/                                    # Next.js Web Application
 │   ├── app/
 │   │   ├── home/
 │   │   │   └── page.tsx                       # Landing page
