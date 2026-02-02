@@ -3,6 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { useRouter } from "next/navigation"
+
 import ProductCard from '../../components/card/ProductCard';
 import {
   ArrowLeft,
@@ -15,6 +17,10 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
+import { getOrCreateConversation } from '@/app/lib/chatService';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseAuthClient } from '@supabase/supabase-js/dist/module/lib/SupabaseAuthClient';
+import { supabase } from '@/app/lib/supabaseClient';
 
 /* 🔹 Phone Schema */
 interface Phone {
@@ -85,6 +91,54 @@ export default function ProductDetailPage() {
 
     fetchSeller();
   }, [phone]);
+  const [user, setUser] = useState<any>(null)
+
+      useEffect(() => {
+      supabase.auth.getUser().then(({ data }) => {
+        setUser(data.user)
+      })
+    }, [])
+  const router = useRouter()
+
+async function handleContact(receiverId: string) {
+  const currentUserId = user?.id;
+  if (!currentUserId) return;
+
+  // 1️⃣ Check if conversation already exists between A & B
+  const { data: existingConvo } = await supabase
+    .from("conversations")
+    .select("*")
+    .or(
+      `user1_id.eq.${currentUserId},user2_id.eq.${receiverId}`
+    )
+    .single();
+
+  let conversation = existingConvo
+
+  // 2️⃣ If it doesn't exist, create it
+  if (!conversation) {
+    const { data: newConvo, error } = await supabase
+      .from("conversation")
+      .insert({
+        user1_id: currentUserId,
+        user2_id: receiverId,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Failed to create conversation:", error)
+      return
+    }
+
+    conversation = newConvo
+  }
+
+  // 3️⃣ Redirect
+  router.push(`/chats?conversation=${conversation.id}`)
+}
+
+
 
   /* 🔹 Add to Cart */
   function addToCart() {
@@ -283,12 +337,12 @@ export default function ProductDetailPage() {
                 </Link>
               )}
 
-              <Link
-                href={'emailto:' + sellerEmail}
-                className="px-6 py-3.5 rounded-lg glass-panel border border-gray-700"
+              <button
+                onClick={() => handleContact(phone.user_id)}
+                className="px-6 py-3.5 rounded-lg glass-panel border border-yellow-500 hover:bg-yellow-500 hover:text-black transition"
               >
                 <MessageCircle />
-              </Link>
+              </button>
 
               <Link
                 href={`/report/${phone.id}`}

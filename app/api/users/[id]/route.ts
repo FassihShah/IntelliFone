@@ -1,36 +1,37 @@
-import { NextResponse } from 'next/server';
-import { supabase } from '../../../lib/supabaseClient';
+import { NextResponse } from "next/server"
+import { supabase } from "../../../lib/supabaseClient"
 
-console.log('route.ts loaded');
+console.log("route.ts loaded")
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
-  console.log('Params:', params);
-  console.log('Request URL:', request.url);
+  // ✅ unwrap params
+  const { id } = await context.params
 
-  const id = params?.id;
+  console.log("Params:", { id })
+  console.log("Request URL:", request.url)
 
   if (!id) {
     return NextResponse.json(
-      { error: 'User ID is required' },
+      { error: "User ID is required" },
       { status: 400 }
-    );
+    )
   }
 
   const { data, error } = await supabase
-    .from('profiles')
-    .select('full_name, email')
-    .eq('id', id)
-    .single();
+    .from("profiles")
+    .select("full_name, email")
+    .eq("id", id)
+    .single()
 
   if (error) {
     return NextResponse.json(
       { error: error.message },
       { status: 404 }
-    );
+    )
   }
 
-  return NextResponse.json(data);
+  return NextResponse.json(data)
 }
