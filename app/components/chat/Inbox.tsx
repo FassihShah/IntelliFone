@@ -1,72 +1,40 @@
-"use client"
+"use client";
 
-import { useEffect, useState } from "react"
-import { supabase } from "../../lib/supabaseClient"
-import { useRouter } from "next/navigation"
-import "./chat.css"
+import { useEffect, useState, useCallback, useRef } from "react";
+import { supabase } from "../../lib/supabaseClient";
+import { useRouter } from "next/navigation";
+import Pusher from "pusher-js";
+import "./chat.css";
 
 interface Message {
-  sender_id: string
-  read_at: string | null
+  sender_id: string;
+  read_at: string | null;
 }
 
 interface Conversation {
-  id: string
-  user1_id: string
-  user2_id: string
-  messages: Message[]
+  id: string;
+  user1_id: string;
+  user2_id: string;
+  messages: Message[];
 }
 
 interface InboxProps {
-  currentUserId: string
-  activeConversation: string | null
-  setActiveConversation: (id: string) => void
+  currentUserId: string;
+  activeConversation?: string;
 }
 
-export default function Inbox({
-  currentUserId,
-  activeConversation,
-  setActiveConversation,
-}: InboxProps) {
-  const [conversations, setConversations] = useState<Conversation[]>([])
-  const [usernames, setUsernames] = useState<Record<string, string>>({})
-  const router = useRouter()
+export default function Inbox({ currentUserId, activeConversation }: InboxProps) {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const router = useRouter();
+  
+  // Use a ref to prevent multiple pusher instances during strict mode
+  const pusherRef = useRef<Pusher | null>(null);
 
-  // Fetch inbox on mount
-  useEffect(() => {
-    fetchInbox()
-  }, [])
-
-  // Subscribe to Realtime changes for new conversations
-  useEffect(() => {
-    const channel = supabase
-      .channel("conversation-inbox")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "conversation",
-        },
-        payload => {
-          const convo = payload.new
-          if (convo.user1_id === currentUserId || convo.user2_id === currentUserId) {
-            fetchInbox()
-          }
-        }
-      )
-      .subscribe()
-
-    // Synchronous cleanup (no async)
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [currentUserId])
-
-  // Fetch inbox from Supabase
-  async function fetchInbox() {
-    const { data } = await supabase
-      .from("conversation")
+  const fetchInbox = useCallback(async () => {
+    if (!currentUserId) return;
+    
+    const { data, error } = await supabase
+      .from("conversation") // Ensure this matches your DB table name
       .select(`
         id,
         user1_id,
@@ -76,68 +44,87 @@ export default function Inbox({
           read_at
         )
       `)
-      .order("id", { ascending: false })
+      // Optional: Only fetch conversations the user is part of
+      .or(`user1_id.eq.${currentUserId},user2_id.eq.${currentUserId}`);
 
-    if (data) {
-      setConversations(data)
-      fetchUsernames(data)
+    if (error) {
+      console.error("Error fetching inbox:", error);
+      return;
     }
-  }
+    if (data) setConversations(data);
+  }, [currentUserId]);
 
-  // Pre-fetch usernames for all conversations
-  async function fetchUsernames(convos: Conversation[]) {
-    const ids = convos.map(c => (c.user1_id === currentUserId ? c.user2_id : c.user1_id))
-    const uniqueIds = Array.from(new Set(ids))
+  useEffect(() => {
+    fetchInbox();
 
-    const { data } = await supabase
-      .from("profiles")
-      .select("id, full_name")
-      .in("id", uniqueIds)
-
-    if (data) {
-      const map: Record<string, string> = {}
-      data.forEach(u => (map[u.id] = u.full_name))
-      setUsernames(map)
+    // Initialize Pusher only once
+    if (!pusherRef.current) {
+      pusherRef.current = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY!, {
+        cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
+      });
     }
-  }
 
-  // Get the other user in a conversation
-  function getOtherUser(convo: Conversation) {
-    return convo.user1_id === currentUserId ? convo.user2_id : convo.user1_id
-  }
+    // Subscribe to a SINGLE channel for this specific user
+    const channel = pusherRef.current.subscribe(`inbox-${currentUserId}`);
 
-  // Count unread messages
-  function getUnreadCount(convo: Conversation) {
-    return convo.messages.filter(
-      m => m.sender_id !== currentUserId && m.read_at === null
-    ).length
-  }
+    // When the API sends a "refresh-inbox" event, we just fetch data once
+    channel.bind("refresh-inbox", () => {
+      fetchInbox();
+    });
+
+    return () => {
+      channel.unbind_all();
+      pusherRef.current?.unsubscribe(`inbox-${currentUserId}`);
+    };
+  }, [currentUserId, fetchInbox]);
+
+  // UI Helpers
+  const getOtherUserId = (convo: Conversation) => 
+    convo.user1_id === currentUserId ? convo.user2_id : convo.user1_id;
+
+  const getUnreadCount = (convo: Conversation) => 
+    convo.messages.filter(m => m.sender_id !== currentUserId && m.read_at === null).length;
 
   return (
     <div className="inbox">
       <h2 className="inbox-title">Inbox</h2>
-
-      {conversations.map(convo => {
-        const otherUserId = getOtherUser(convo)
-        const unread = getUnreadCount(convo)
-        const name = usernames[otherUserId] || "Loading..."
-
-        return (
-          <div
-            key={convo.id}
-            className={`inbox-item ${
-              activeConversation === convo.id ? "active" : ""
-            }`}
-            onClick={() => {
-              setActiveConversation(convo.id)
-              router.push(`/chats?conversation=${convo.id}`)
-            }}
-          >
-            <span className="username">{name}</span>
-            {unread > 0 && <span className="unread-badge">{unread}</span>}
-          </div>
-        )
-      })}
+      {conversations.length === 0 && (
+        <div className="no-messages">No conversations yet</div>
+      )}
+      {conversations.map((convo) => (
+        <ConversationItem
+          key={convo.id}
+          otherUserId={getOtherUserId(convo)}
+          unread={getUnreadCount(convo)}
+          isActive={activeConversation === convo.id}
+          onClick={() => router.push(`/chats?conversation=${convo.id}`)}
+        />
+      ))}
     </div>
-  )
+  );
+}
+
+function ConversationItem({ otherUserId, unread, isActive, onClick }: any) {
+  const [otherUserName, setOtherUserName] = useState("Loading...");
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchName = async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", otherUserId)
+        .single();
+      if (mounted) setOtherUserName(data?.full_name || "Unknown User");
+    };
+    fetchName();
+    return () => { mounted = false; };
+  }, [otherUserId]);
+
+  return (
+    <div className={`inbox-item ${isActive ? "active" : ""}`} onClick={onClick}>
+      <span className="username">{otherUserName}</span>
+      {unread > 0 && <span className="unread-badge">{unread}</span>}
+    </div>
+  );
 }

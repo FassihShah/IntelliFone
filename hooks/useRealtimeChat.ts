@@ -1,32 +1,29 @@
 "use client";
 
-import { useEffect } from "react"
-import { supabase } from "../app/lib/supabaseClient"
+import { useEffect } from "react";
+import Pusher from "pusher-js";
 
 export function useRealtimeChat(
   conversationId: string | null,
   onNewMessage: (message: any) => void
 ) {
   useEffect(() => {
-    if (!conversationId) return // guard null safely
+    if (!conversationId) return;
 
-    const channel = supabase
-      .channel(`chat-${conversationId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-          filter: `conversation_id=eq.${conversationId}`
-        },
-        payload => onNewMessage(payload.new)
-      )
-      .subscribe()
+    const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY!, {
+      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
+    });
 
-    // Cleanup
+    const channel = pusher.subscribe(`chat-${conversationId}`);
+
+    channel.bind("new-message", (data: any) => {
+      onNewMessage(data);
+    });
+
     return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [conversationId, onNewMessage])
+      channel.unbind_all();
+      channel.unsubscribe();
+      pusher.disconnect();
+    };
+  }, [conversationId, onNewMessage]);
 }

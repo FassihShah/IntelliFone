@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { supabase } from '../lib/supabaseClient';
-import { Smartphone, LogOut, User } from 'lucide-react';
+import { Smartphone, LogOut, User,ChartAreaIcon,Inbox } from 'lucide-react';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<any>(null);
@@ -55,6 +55,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className="hidden md:flex gap-3 items-center">
             {user ? (
               <>
+                <Link href="/chats" className="font-semibold">
+                  <Inbox className="w-4 h-4 inline-block mr-1" />
+                </Link>
                 <Link href="/saved"
                 className='font-semibold'
                 >Saved </Link>
@@ -62,6 +65,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <User className="w-4 h-4" />
                   {user.email}
                 </span>
+                
                 
                 <button onClick={handleLogout} className="hover:text-red-400">
                   <LogOut />

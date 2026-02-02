@@ -1,52 +1,77 @@
-"use client"
+"use client";
 
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
-import { supabase } from "../lib/supabaseClient"
-import Inbox from "../components/chat/Inbox"
-import ChatWindow from "../components/chat/ChatWindow"
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { supabase } from "../lib/supabaseClient";
+import Inbox from "../components/chat/Inbox";
+import ChatWindow from "../components/chat/ChatWindow";
 
 export default function ChatPage() {
-  const router = useRouter()
-  const [currentUser, setCurrentUser] = useState<any>(null)
-  const [activeConversation, setActiveConversation] = useState<string | null>(null)
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  
+  // Get the conversation ID from the URL (?conversation=ID)
+  const activeConversation = searchParams.get("conversation");
+
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 1️⃣ Get current session
-    const session = supabase.auth.getSession().then(({ data }) => {
-      if (!data?.session?.user) {
-        router.push("/signin")
+    const checkSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      
+      if (!data?.session) {
+        router.push("/signin");
       } else {
-        setCurrentUser(data.session.user)
+        setCurrentUser(data.session.user);
       }
-    })
+      setLoading(false);
+    };
 
-    // 2️⃣ Listen for auth changes
+    checkSession();
+
     const { data: listener } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        if (!session?.user) router.push("/signin")
-        else setCurrentUser(session.user)
+        if (event === "SIGNED_OUT" || !session) {
+          router.push("/signin");
+        } else {
+          setCurrentUser(session.user);
+          setLoading(false);
+        }
       }
-    )
+    );
 
     return () => {
-      listener.subscription.unsubscribe()
-    }
-  }, [])
+      listener.subscription.unsubscribe();
+    };
+  }, [router]);
 
-  if (!currentUser) return null // avoid flicker / redirect before session loads
+  // 🛡️ Guard: Show a loader instead of 'null' 
+  // This prevents the "flash" that often triggers auto-logouts
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <p>Loading your messages...</p>
+      </div>
+    );
+  }
+
+  if (!currentUser) return null;
 
   return (
-    <div className="chat-page flex h-full">
-      <Inbox
-        currentUserId={currentUser.id}
-        activeConversation={activeConversation}
-        setActiveConversation={setActiveConversation}
-      />
-      <ChatWindow
-        currentUserId={currentUser.id}
-        conversationId={activeConversation}
-      />
+    <div className="chat-page flex h-screen overflow-hidden">
+      <div className="w-1/3 border-r h-full overflow-y-auto">
+        <Inbox 
+          currentUserId={currentUser.id} 
+          activeConversation={activeConversation || undefined} 
+        />
+      </div>
+      <div className="w-2/3 h-full">
+        <ChatWindow
+          currentUserId={currentUser.id}
+          conversationId={activeConversation}
+        />
+      </div>
     </div>
-  )
+  );
 }
