@@ -11,10 +11,18 @@ export default function SigninPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL;
+  const adminPassword = process.env.NEXT_PUBLIC_ADMIN_PASSWORD;
 
   const handleSignin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (adminEmail && adminPassword && email === adminEmail && password === adminPassword) {
+      router.push('/admin');
+      return;
+    }
+
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password

@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { supabase } from '../lib/supabaseClient';
-import { Smartphone, LogOut, User,ChartAreaIcon,Inbox } from 'lucide-react';
+import { Smartphone, LogOut,Bookmark, MessageSquare,Inbox,UserCircle} from 'lucide-react';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<any>(null);
@@ -56,15 +56,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {user ? (
               <>
                 <Link href="/chats" className="font-semibold">
-                  <Inbox className="w-4 h-4 inline-block mr-1" />
+                  <Inbox className="w-4 h-4 inline-block mr-1" /> Inbox
                 </Link>
                 <Link href="/saved"
                 className='font-semibold'
-                >Saved </Link>
-                <span className="flex items-center gap-2">
+                ><Bookmark className="w-4 h-4 inline-block mr-1" /> Saved</Link>
+                <Link href="/profile" className="font-semibold"> 
+                   <UserCircle className="w-4 h-4 inline-block mr-1" />Profile
+                </Link>
+                {/* <span className="flex items-center gap-2">
                   <User className="w-4 h-4" />
                   {user.email}
-                </span>
+                </span> */}
+                
+
                 
                 
                 <button onClick={handleLogout} className="hover:text-red-400">
