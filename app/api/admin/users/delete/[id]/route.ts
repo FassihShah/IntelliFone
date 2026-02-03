@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { supabaseAdmin } from "@/app/lib/supabaseAdmin";
 
 function extractStoragePath(publicUrl: string, bucket: string): string | null {
   if (!publicUrl) return null;
