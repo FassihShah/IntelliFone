@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional
-
+import typing
+from typing import List
 
 class UsedMobile(BaseModel):
     brand: Optional[str] = None
@@ -66,3 +67,19 @@ class NewMobile(BaseModel):
     sensors: Optional[str] = None
 
     price: Optional[str] = None    
+
+class ChatRequest(BaseModel):
+    user_id: str
+    message: str
+    conversation_id: Optional[str] = None
+
+class ChatResponse(BaseModel):
+    conversation_id: str
+    reply: str
+class ChatMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+class ChatHistoryResponse(BaseModel):
+    conversation_id: str
+    messages: List[ChatMessage]

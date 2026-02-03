@@ -81,4 +81,5 @@ Keep explanations concise and structured in short paragraphs.
 
 
     response = model.invoke(prompt)
+    print("Generated Recommendation Response called")
     return {"recommendations": response.text}

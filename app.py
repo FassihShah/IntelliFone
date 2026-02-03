@@ -12,10 +12,17 @@ from ReportGenerator.report_generator import generate_damage_report
 # --- Import your modules ---
 from models import UsedMobile
 from DamageDetection.Damage_Detection import analyze_phone_images
-# from ConditionScoring.condition_scoring import compute_condition_score
-# from PricePrediction.predict_price_service import run_pipeline, merge_ai_user_flags
+from ConditionScoring.condition_scoring import compute_condition_score
+from PricePrediction.predict_price_service import run_pipeline, merge_ai_user_flags
 from RecommendationEngine.recommendation_service import get_recommendations
-             
+from models import ChatRequest, ChatResponse, ChatHistoryResponse
+from ChatBot.chatbot import generate_reply
+from ChatBot.crud import (
+    create_conversation,
+    get_chat_history,
+    get_chat_history_formatted,
+    save_message
+)
 
 app = FastAPI(title="IntelliFone AI Backend")
 
@@ -72,6 +79,7 @@ async def damage_detection(payload: DamageDetectionRequest):
         show_output=False,
         save_output=True
     )
+    
     os.makedirs("reports", exist_ok=True)
 
     report_path = f"reports/damage_report_{uuid.uuid4()}.pdf"
@@ -81,76 +89,84 @@ async def damage_detection(payload: DamageDetectionRequest):
         output_dir="outputs",
         report_path=report_path
     )
+    report_path = os.path.abspath(
+    os.path.join("", report_path)
+   )
+    if os.path.exists("outputs"):
+        shutil.rmtree("outputs")
 
-    return FileResponse(
-        report_path,
-        media_type="application/pdf",
-        filename="damage_report.pdf",
-        headers={"X-Damage-Results": str(result["damages"])}
-    )
+    if os.path.exists("uploads"):
+        shutil.rmtree("uploads")
+    print(f"[REPORT GENERATED] {report_path}")
+    result = compute_condition_score(result)
+    return {
+        "pdf_path": report_path,
+        "condition_score": result["condition_score"],
+        "ai_detected": result["ai_detected"]
+    }
 
 
-# # ============================================================
-# #  ENDPOINT 2 — CONDITION SCORING
-# # ============================================================
-# @app.post("/condition-scoring/")
-# async def condition_scoring(damage_json: dict):
-#     result = compute_condition_score(damage_json)
-#     return result
+# ============================================================
+#  ENDPOINT 2 — CONDITION SCORING
+# ============================================================
+@app.post("/condition-scoring/")
+async def condition_scoring(damage_json: dict):
+    result = compute_condition_score(damage_json)
+    return result
 
 
 
 # # ============================================================
 # #  ENDPOINT 3 — PRICE PREDICTION (AI + USER FALLBACK)
 # # ============================================================
-# @app.post("/price-prediction/")
-# async def price_prediction(
-#     brand: Optional[str] = Form(None),
-#     model: Optional[str] = Form(None),
-#     ram: Optional[str] = Form(None),
-#     storage: Optional[str] = Form(None),
-#     condition_score: float = Form(...),
+@app.post("/price-prediction/")
+async def price_prediction(
+    brand: Optional[str] = Form(None),
+    model: Optional[str] = Form(None),
+    ram: Optional[str] = Form(None),
+    storage: Optional[str] = Form(None),
+    condition_score: float = Form(...),
 
-#     # User fallback fields
-#     is_panel_changed: bool = Form(False),
-#     screen_crack: bool = Form(False),
-#     panel_dot: bool = Form(False),
-#     panel_line: bool = Form(False),
-#     panel_shade: bool = Form(False),
-#     camera_lens_ok: bool = Form(True),
-#     fingerprint_ok: bool = Form(True),
-#     pta_approved: bool = Form(True),
+    # User fallback fields
+    is_panel_changed: bool = Form(False),
+    screen_crack: bool = Form(False),
+    panel_dot: bool = Form(False),
+    panel_line: bool = Form(False),
+    panel_shade: bool = Form(False),
+    camera_lens_ok: bool = Form(True),
+    fingerprint_ok: bool = Form(True),
+    pta_approved: bool = Form(True),
 
-#     ai_screen_crack: bool = Form(False),
-#     ai_panel_dot: bool = Form(False),
-#     ai_panel_line: bool = Form(False)
-# ):
-#     ai_flags = {
-#         "screen_crack": ai_screen_crack,
-#         "panel_dot": ai_panel_dot,
-#         "panel_line": ai_panel_line
-#     }
+    ai_screen_crack: bool = Form(False),
+    ai_panel_dot: bool = Form(False),
+    ai_panel_line: bool = Form(False)
+):
+    ai_flags = {
+        "screen_crack": ai_screen_crack,
+        "panel_dot": ai_panel_dot,
+        "panel_line": ai_panel_line
+    }
 
-#     mobile = UsedMobile(
-#         brand=brand,
-#         model=model,
-#         ram=ram,
-#         storage=storage,
-#         condition_score=condition_score,
+    mobile = UsedMobile(
+        brand=brand,
+        model=model,
+        ram=ram,
+        storage=storage,
+        condition_score=condition_score,
 
-#         is_panel_changed=is_panel_changed,
-#         screen_crack=screen_crack,
-#         panel_dot=panel_dot,
-#         panel_line=panel_line,
-#         panel_shade=panel_shade,
-#         camera_lens_ok=camera_lens_ok,
-#         fingerprint_ok=fingerprint_ok,
-#         pta_approved=pta_approved
-#     )
+        is_panel_changed=is_panel_changed,
+        screen_crack=screen_crack,
+        panel_dot=panel_dot,
+        panel_line=panel_line,
+        panel_shade=panel_shade,
+        camera_lens_ok=camera_lens_ok,
+        fingerprint_ok=fingerprint_ok,
+        pta_approved=pta_approved
+    )
 
-#     price_range = run_pipeline(mobile, ai_flags)
+    price_range = run_pipeline(mobile, ai_flags)
 
-#     return price_range
+    return price_range
 
 
 
@@ -259,3 +275,31 @@ async def damage_detection(payload: DamageDetectionRequest):
 @app.get("/recommend/")
 async def recommend_phones(max_price: float, priority: str):
     return get_recommendations(max_price, priority)
+# ============================================================
+#  ENDPOINT 6 — CHATBOT INTERFACE
+@app.post("/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest):
+    conversation_id = req.conversation_id
+
+    if not conversation_id:
+        conversation_id = create_conversation(
+            req.user_id, req.message
+        )
+
+    history = get_chat_history(conversation_id)
+
+    reply = generate_reply(history, req.message)
+
+    save_message(conversation_id, req.user_id, "user", req.message)
+    save_message(conversation_id, req.user_id, "assistant", reply)
+
+    return {
+        "conversation_id": conversation_id,
+        "reply": reply
+    }
+# ============================================================
+#  ENDPOINT 7 — get all messages in a conversation
+@app.get("/chat/{conversation_id}", response_model=ChatHistoryResponse)
+async def get_chat(conversation_id: str):
+    history = get_chat_history_formatted(conversation_id)
+    return history
