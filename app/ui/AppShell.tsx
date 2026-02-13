@@ -104,6 +104,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             ) : (
               <Link href="/signin">Login</Link>
             )}
+             <Link href="/chats" className="font-semibold">
+                  <Inbox className="w-4 h-4 inline-block mr-1" /> Inbox
+                </Link>
+                <Link href="/saved"
+                className='font-semibold'
+                ><Bookmark className="w-4 h-4 inline-block mr-1" /> Saved</Link>
+                <Link href="/profile" className="font-semibold"> 
+                   <UserCircle className="w-4 h-4 inline-block mr-1" />Profile
+              </Link>
           </div>
         )}
       </header>
