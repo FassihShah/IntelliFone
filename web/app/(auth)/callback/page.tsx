@@ -19,7 +19,7 @@ export default function AuthCallback() {
           created_at: new Date().toISOString(),
         }, { onConflict: 'id' });
 
-        router.push('/dashboard'); // redirect to dashboard
+        router.push('/'); // redirect to dashboard
       } else {
         router.push('/signup'); // fallback
       }

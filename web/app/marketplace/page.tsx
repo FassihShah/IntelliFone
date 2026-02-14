@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
+import { stringify } from "querystring";
 
 interface Phone {
   id: string;
@@ -117,11 +118,11 @@ export default function Marketplace() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Storage</SelectItem>
-                <SelectItem value="64GB">64GB</SelectItem>
-                <SelectItem value="128GB">128GB</SelectItem>
-                <SelectItem value="256GB">256GB</SelectItem>
-                <SelectItem value="512GB">512GB</SelectItem>
-                <SelectItem value="1TB">1TB</SelectItem>
+                <SelectItem value="64">64GB</SelectItem>
+                <SelectItem value="128">128GB</SelectItem>
+                <SelectItem value="256">256GB</SelectItem>
+                <SelectItem value="512">512GB</SelectItem>
+                <SelectItem value="1024">1024GB</SelectItem>
               </SelectContent>
             </Select>
           </div>

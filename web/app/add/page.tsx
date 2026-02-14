@@ -12,10 +12,10 @@ export default function SellPhone() {
     name: '',
     model: '',
     company: '',
-    ram: '',
-    storage: '',
+    ram: '0',
+    storage: '0',
     description: '',
-    price: 0,
+    price: '0',
     pta_status: 'approved',
   });
 
@@ -101,7 +101,7 @@ export default function SellPhone() {
     }
 
     alert('Phone listed successfully!');
-    router.push(`/products/${data.id}`);
+    router.push(`/marketplace`);
    
 
   };
@@ -169,7 +169,7 @@ export default function SellPhone() {
               onChange={(e) => setFormData({ ...formData, storage: e.target.value })} required />
 
             <input className="w-full bg-black border border-gray-700 p-3 rounded-xl" placeholder="Price (in PKR)"
-              onChange={(e) => setFormData({ ...formData, storage: e.target.value })} required />
+              onChange={(e) => setFormData({ ...formData, price: e.target.value })} required />
 
             <textarea className="w-full bg-black border border-gray-700 p-3 rounded-xl" placeholder="Description..."
               rows={4} onChange={(e) => setFormData({ ...formData, description: e.target.value })} />
@@ -190,7 +190,8 @@ export default function SellPhone() {
 
           <button
             type="submit"
-            className="w-full bg-yellow-400 text-black py-3 rounded-xl font-bold text-lg hover:opacity-90"
+            className="w-full  text-black py-3 rounded-xl font-bold text-lg hover:opacity-90"
+            style={{backgroundColor: "#f7f435"}}
           >
             Submit Listing
           </button>

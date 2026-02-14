@@ -3,6 +3,7 @@ import './globals.css'
 import type { ReactNode } from 'react'
 import { Geist, Geist_Mono } from 'next/font/google'
 import ClientProviders from './ClientProvider';
+import AppShell from './ui/AppShell';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -24,7 +25,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <ClientProviders>
-          {children}
+          <AppShell> {children}</AppShell>  
         </ClientProviders>
       </body>
     </html>

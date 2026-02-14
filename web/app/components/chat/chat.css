@@ -1,0 +1,173 @@
+/* --- Variables for a Modern Palette --- */
+:root {
+  --bg-dark: #09090b; /* Slightly deeper black */
+  --sidebar-bg: #111113;
+  --accent-yellow: #facc15;
+  --text-main: #fafafa;
+  --text-muted: #71717a;
+  --msg-outgoing: #18181b;
+  --msg-incoming: #facc15;
+  --input-bg: #18181b;
+  --border-color: #27272a;
+  --radius: 12px;
+}
+
+/* --- Layout Fix: Prevent Page Scroll --- */
+.chat-page {
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  overflow: hidden; /* This stops the input bar from moving downward */
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  font-family: 'Inter', -apple-system, sans-serif;
+}
+
+/* --- Inbox Sidebar --- */
+.inbox {
+  width: 320px;
+  background-color: var(--sidebar-bg);
+  padding: 1.5rem 0;
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.inbox-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  padding: 0 1.5rem 1.5rem 1.5rem;
+  color: var(--accent-yellow);
+  letter-spacing: -0.02em;
+}
+
+.inbox-item {
+  padding: 0.85rem 1.25rem;
+  margin: 0.25rem 0.75rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.inbox-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.inbox-item.active {
+  background-color: rgba(250, 204, 21, 0.1);
+  border: 1px solid rgba(250, 204, 21, 0.2);
+}
+
+.inbox-item.active .username {
+  color: var(--accent-yellow);
+  font-weight: 600;
+}
+
+/* --- Chat Window Fix --- */
+.chat-window {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100vh; /* Locks window to screen height */
+  background-color: var(--bg-dark);
+  position: relative;
+}
+
+.chat-window.empty {
+  justify-content: center;
+  align-items: center;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* --- Messages Area Fix --- */
+.messages {
+  flex: 1; /* Takes up all available space */
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  overflow-y: auto; /* Scroll happens only here */
+}
+
+/* --- Modern Message Bubbles --- */
+.message {
+  max-width: 65%;
+  padding: 0.75rem 1rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.message.outgoing {
+  align-self: flex-end;
+  background-color: var(--msg-outgoing);
+  color: var(--text-main);
+  border-radius: 16px 16px 2px 16px;
+  border: 1px solid var(--border-color);
+}
+
+.message.incoming {
+  align-self: flex-start;
+  background-color: var(--msg-incoming);
+  color: #000;
+  font-weight: 500;
+  border-radius: 16px 16px 16px 2px;
+}
+
+/* --- Fixed Input Bar --- */
+.input-bar {
+  flex-shrink: 0; /* Prevents the bar from being pushed down or squashed */
+  padding: 1.25rem 2rem;
+  background-color: rgba(9, 9, 11, 0.8);
+  backdrop-filter: blur(10px); /* Glass effect */
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.input-bar input {
+  flex: 1;
+  background-color: var(--input-bg);
+  border: 1px solid var(--border-color);
+  padding: 0.75rem 1.25rem;
+  border-radius: 9999px;
+  color: #fff;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.input-bar input:focus {
+  border-color: var(--accent-yellow);
+  background-color: #1c1c1f;
+}
+
+.input-bar button {
+  background-color: var(--accent-yellow);
+  color: #000;
+  font-weight: 700;
+  padding: 0.75rem 1.5rem;
+  border-radius: 9999px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.input-bar button:hover {
+  transform: scale(1.03);
+  box-shadow: 0 0 15px rgba(250, 204, 21, 0.3);
+}
+
+/* Custom Scrollbar */
+.messages::-webkit-scrollbar {
+  width: 4px;
+}
+.messages::-webkit-scrollbar-thumb {
+  background-color: var(--border-color);
+  border-radius: 10px;
+}

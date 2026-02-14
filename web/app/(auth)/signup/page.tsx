@@ -94,15 +94,15 @@ export default function SignupPage() {
       });
     }
 
-    router.push('/auth/check-email');
+    router.push('/');
   };
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center px-4">
+    <div className="min-h-screen bg-black flex items-center justify-center px-4 mt-4 mb-4">
       <div className="w-full max-w-md bg-gray-900/70 border border-[#f7f435]/30 rounded-2xl p-8 shadow-xl">
 
         <div className="text-center mb-8">
-          <div className="w-14 h-14 bg-[#f7f435] rounded-2xl flex items-center justify-center mx-auto text-black text-2xl font-bold">IF</div>
+      
           <h1 className="text-3xl font-bold text-white mt-4">Create Account</h1>
           <p className="text-gray-400 text-sm mt-1">Join IntelliFone Marketplace</p>
         </div>
@@ -157,7 +157,7 @@ export default function SignupPage() {
 
         <p className="text-gray-400 mt-6 text-center text-sm">
           Already have an account?{' '}
-          <Link href="/auth/login" className="text-[#f7f435] hover:underline">
+          <Link href="/auth/signin" className="text-[#f7f435] hover:underline">
             Login
           </Link>
         </p>
