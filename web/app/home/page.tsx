@@ -14,7 +14,28 @@ export default function Home() {
 
   React.useEffect(() => {
     // Placeholder: replace with real data fetching logic.
-    setPhones([]);
+    let mounted1 = true;
+
+  async function loadPhones() {
+    try {
+      const res = await fetch('/api/phones/list');
+
+      if (!res.ok) {
+        throw new Error('Failed to fetch phones');
+      }
+
+      const data = await res.json();
+
+      if (mounted) {
+        setPhones(data); // assuming API returns an array
+      }
+    } catch (err) {
+      console.error('Error loading phones:', err);
+      if (mounted1) setPhones([]);
+    }
+  }
+
+  loadPhones();
 
     let mounted = true;
     supabase.auth.getUser().then(({ data }) => {
@@ -50,7 +71,7 @@ export default function Home() {
   return (
     <div className="min-h-screen">
       {/* Navigation */}
-      <nav className="w-full bg-black/60 backdrop-blur sticky top-0 z-30">
+      {/* <nav className="w-full bg-black/60 backdrop-blur sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-4">
@@ -87,7 +108,7 @@ export default function Home() {
             </div>
           </div>
         </div>
-      </nav>
+      </nav> */}
       {/* Hero Section */}
       <section className="relative overflow-hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 relative z-10">
@@ -311,7 +332,7 @@ export default function Home() {
               List your phone in minutes and get instant AI verification
             </p>
             <Link 
-              href="/sell"
+              href="/add"
               className="inline-block px-10 py-4 rounded-xl text-black text-lg font-semibold neon-glow"
               style={{ backgroundColor: "#f7f434" }}
             >

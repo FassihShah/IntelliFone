@@ -75,7 +75,7 @@ export default function Recommendations() {
             <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
               <Slider
                 min={10000}
-                max={500000}
+                max={150000}
                 step={10000}
                 value={budgetRange}
                 onValueChange={setBudgetRange}
@@ -86,7 +86,7 @@ export default function Recommendations() {
               >
              
                 <span>Rs. 10,000</span>
-                <span>Rs. 500,000</span>
+                <span>Rs. 150,000</span>
               </div>
             </div>
           </div>

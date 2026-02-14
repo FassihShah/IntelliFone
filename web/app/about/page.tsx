@@ -219,10 +219,11 @@ export default function About() {
               Join thousands of users who trust IntelliFone for their phone trading needs
             </p>
             <div className="flex flex-wrap gap-4 justify-center">
-              <Link href="/marketplace" className="px-8 py-4 rounded-xl yellow-btn text-lg">
+              <Link href="/marketplace" className="px-8 py-4 rounded-xl yellow-btn text-black font-semibold text-lg"
+              style={{backgroundColor: "#f7f434"}}>
                 Browse Marketplace
               </Link>
-              <Link href="/sell" className="px-8 py-4 rounded-xl glass-panel border border-[#f7f435] hover:bg-[#f7f435] hover:text-black transition-all text-lg">
+              <Link href="/add" className="px-8 py-4 rounded-xl glass-panel border border-[#f7f435] hover:bg-[#f7f435] hover:text-black transition-all text-lg">
                 Sell Your Phone
               </Link>
             </div>

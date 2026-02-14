@@ -46,7 +46,7 @@ export default function ProductCard({ phone }: { phone: Phone }) {
         </div>
 
         <div className="flex gap-2 text-xs text-gray-400 mb-4">
-          {phone.storage && <span className="bg-gray-800 px-2 py-1 rounded">{phone.storage}</span>}
+          {phone.storage && <span className="bg-gray-800 px-2 py-1 rounded">{phone.storage} GBs</span>}
           {phone.ram && (
             <span className="bg-gray-800 px-2 py-1 rounded">{phone.ram} GBs</span>
           )}
@@ -54,7 +54,8 @@ export default function ProductCard({ phone }: { phone: Phone }) {
 
           <Link
             href={`/phones/${phone.id}`}
-            className="block w-full text-center py-2 rounded-lg bg-yellow-400 text-black font-semibold hover:bg-yellow-500 transition"
+            className="block w-full text-center py-2 rounded-lg  text-black font-semibold hover:bg-yellow-500 transition"
+            style={{backgroundColor: "#f7f434"}}
           >
             View Details
           </Link>

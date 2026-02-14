@@ -470,4 +470,4 @@ def scrape_used_data(model: str, brand: str):
 # ============================================================
 # TEST RUN
 # ============================================================
-scrape_used_data("Pixel 6A", "Google")
+#scrape_used_data("Pixel 6A", "Google")

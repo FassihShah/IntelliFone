@@ -13,13 +13,23 @@ from report_generator import generate_damage_report
 from models import UsedMobile
 from DamageDetection.Damage_Detection import analyze_phone_images
 from ConditionScoring.condition_scoring import compute_condition_score
-from PricePrediction.predict_price_service import run_pipeline
 from RecommendationEngine.recommendation_service import get_recommendations
-             
+from models import ChatRequest, ChatResponse, ChatHistoryResponse
+from ChatBot.chatbot import generate_reply
+from ChatBot.crud import (
+    create_conversation,
+    get_chat_history,
+    get_chat_history_formatted,
+    save_message
+)
 
 app = FastAPI(title="IntelliFone AI Backend")
 
-detection_model = "best3.pt"
+
+
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to IntelliFone!"}
 
 
 # # ============================================================
@@ -30,65 +40,53 @@ class DamageDetectionRequest(BaseModel):
 
 
 @app.post("/damage-detection/")
-async def damage_detection(
-    front: Optional[UploadFile] = File(None),
-    back: Optional[UploadFile] = File(None),
-    left: Optional[UploadFile] = File(None),
-    right: Optional[UploadFile] = File(None),
-    top: Optional[UploadFile] = File(None),
-    bottom: Optional[UploadFile] = File(None),
-):
+async def damage_detection(payload: DamageDetectionRequest):
+
+    if len(payload.image_urls) == 0:
+        raise HTTPException(status_code=400, detail="At least one image URL is required")
+
+    if len(payload.image_urls) > 6:
+        raise HTTPException(status_code=400, detail="Maximum 6 image URLs allowed")
+
     os.makedirs("uploads", exist_ok=True)
 
-    uploads = {}
+    # Expected sides (order-based mapping)
+    sides = ["front", "back", "left", "right", "top", "bottom"]
 
-    images = {
-        "front": front,
-        "back": back,
-        "left": left,
-        "right": right,
-        "top": top,
-        "bottom": bottom
-    }
+    saved = {side: None for side in sides}
 
-    if not any(images.values()):
-        raise HTTPException(
-            status_code=400,
-            detail="At least one image is required"
-        )
+    # Download images
+    for idx, url in enumerate(payload.image_urls):
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
 
-    # -------------------------------
-    # Save uploaded images
-    # -------------------------------
-    for side, img in images.items():
-        if img:
-            ext = os.path.splitext(img.filename)[1] or ".jpg"
+            ext = os.path.splitext(urlparse(url).path)[1] or ".jpg"
             file_name = f"{uuid.uuid4()}{ext}"
             file_path = os.path.join("uploads", file_name)
 
             with open(file_path, "wb") as f:
-                shutil.copyfileobj(img.file, f)
+                f.write(response.content)
 
-            uploads[side] = file_path
-        else:
-            uploads[side] = None
+            saved[sides[idx]] = file_path
 
-    # -------------------------------
-    # Run YOLO Damage Detection
-    # -------------------------------
-    model_path = os.path.join(os.path.dirname(__file__), detection_model)
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to download image at index {idx}: {str(e)}"
+            )
 
+    # Run YOLO model
+    model_path = os.path.join(os.path.dirname(__file__), "best2.pt")
     result = analyze_phone_images(
         model_path,
-        uploads,
+        saved,
         show_output=False,
         save_output=True
     )
-
-    # -------------------------------
-    # Generate PDF Report
-    # -------------------------------
+    
     os.makedirs("reports", exist_ok=True)
+
     report_path = f"reports/damage_report_{uuid.uuid4()}.pdf"
 
     generate_damage_report(
@@ -96,16 +94,21 @@ async def damage_detection(
         output_dir="outputs",
         report_path=report_path
     )
+    report_path = os.path.abspath(
+    os.path.join("", report_path)
+   )
+    if os.path.exists("outputs"):
+        shutil.rmtree("outputs")
 
-    return FileResponse(
-        report_path,
-        media_type="application/pdf",
-        filename="damage_report.pdf",
-        headers={
-            "X-Damage-Results": str(result["damages"])
-        }
-    )
-
+    if os.path.exists("uploads"):
+        shutil.rmtree("uploads")
+    print(f"[REPORT GENERATED] {report_path}")
+    result = compute_condition_score(result)
+    return {
+        "pdf_path": report_path,
+        "condition_score": result["condition_score"],
+        "ai_detected": result["ai_detected"]
+    }
 
 
 # ============================================================
@@ -118,9 +121,9 @@ async def condition_scoring(damage_json: dict):
 
 
 
-# ============================================================
-#  ENDPOINT 3 — PRICE PREDICTION (AI + USER FALLBACK)
-# ============================================================
+# # ============================================================
+# #  ENDPOINT 3 — PRICE PREDICTION (AI + USER FALLBACK)
+# # ============================================================
 @app.post("/price-prediction/")
 async def price_prediction(
     brand: Optional[str] = Form(None),
@@ -222,7 +225,7 @@ async def full_verification(
     # -------------------------------
     # Run YOLO Damage Detection
     # -------------------------------
-    model_path = os.path.join(os.path.dirname(__file__), detection_model)
+    model_path = os.path.join(os.path.dirname(__file__), "best2.pt")
     damage_result = analyze_phone_images(model_path, uploads, show_output=False, save_output=False)
 
     # -------------------------------
@@ -249,7 +252,7 @@ async def full_verification(
         camera_lens_ok=camera_lens_ok,
         fingerprint_ok=fingerprint_ok,
         pta_approved=pta_approved,
-        images=[img for img in uploads.values() if img is not None]
+        images=list(uploads.values())
     )
 
     # -------------------------------
@@ -277,3 +280,34 @@ async def full_verification(
 @app.get("/recommend/")
 async def recommend_phones(max_price: float, priority: str):
     return get_recommendations(max_price, priority)
+
+
+
+# ============================================================
+#  ENDPOINT 6 — CHATBOT INTERFACE
+@app.post("/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest):
+    conversation_id = req.conversation_id
+
+    if not conversation_id:
+        conversation_id = create_conversation(
+            req.user_id, req.message
+        )
+
+    history = get_chat_history(conversation_id)
+
+    reply = generate_reply(history, req.message)
+
+    save_message(conversation_id, req.user_id, "user", req.message)
+    save_message(conversation_id, req.user_id, "assistant", reply)
+
+    return {
+        "conversation_id": conversation_id,
+        "reply": reply
+    }
+# ============================================================
+#  ENDPOINT 7 — get all messages in a conversation
+@app.get("/chat/{conversation_id}", response_model=ChatHistoryResponse)
+async def get_chat(conversation_id: str):
+    history = get_chat_history_formatted(conversation_id)
+    return history

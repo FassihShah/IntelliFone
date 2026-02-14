@@ -113,7 +113,7 @@ export default function TermsOfService() {
           </div>
         </div>
 
-        <p className="text-center text-sm text-gray-500">Last updated: January 2025</p>
+        <p className="text-center text-sm text-gray-500">Last updated: November 2025</p>
       </div>
     </div>
   );
