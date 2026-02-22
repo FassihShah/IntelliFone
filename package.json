@@ -17,7 +17,7 @@
     "clsx": "^2.1.1",
     "emailjs-com": "^3.2.0",
     "lucide-react": "^0.560.0",
-    "next": "16.0.3",
+    "next": "16.0.10",
     "pusher": "^5.3.2",
     "pusher-js": "^8.4.0",
     "react": "19.2.0",
