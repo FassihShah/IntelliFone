@@ -1,6 +1,5 @@
 import { supabase } from "@/app/lib/supabaseClient";
 import { NextResponse } from "next/server";
-import fs from "fs";
 
 export async function POST(req: Request) {
   try {
@@ -10,8 +9,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No images provided" }, { status: 400 });
     }
 
-    // 1️⃣ Call FastAPI
-    const fastapiRes = await fetch("http://127.0.0.1:8000/damage-detection/", {
+    const fastapiBaseUrl = process.env.FASTAPI_BASE_URL ?? "http://127.0.0.1:8000";
+    const fastapiRes = await fetch(`${fastapiBaseUrl}/damage-detection/`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ image_urls: pictureUrls }),
@@ -20,45 +19,26 @@ export async function POST(req: Request) {
     const fastapiData = await fastapiRes.json();
     console.log("FastAPI response:", fastapiData);
 
-    const { pdf_path, condition_score } = fastapiData;
-    if (!fastapiData.pdf_path) {
-      return NextResponse.json({ error: "PDF path missing" }, { status: 500 });
+    if (!fastapiRes.ok) {
+      return NextResponse.json(
+        { error: fastapiData?.detail || fastapiData?.error || "FastAPI request failed" },
+        { status: fastapiRes.status }
+      );
     }
 
-    // 2️⃣ Read PDF from disk
-    const pdfBuffer = fs.readFileSync(fastapiData.pdf_path);
-
-    // 3️⃣ Upload to Supabase
-    const pdfName = `damage_reports/report_${Date.now()}.pdf`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("phone-reports")
-      .upload(pdfName, pdfBuffer, {
-        contentType: "application/pdf",
-        upsert: true,
-      });
-
-    if (uploadError) {
-      return NextResponse.json({ error: uploadError.message }, { status: 500 });
+    const { pdf_url, condition_score } = fastapiData;
+    if (!pdf_url) {
+      return NextResponse.json({ error: "PDF URL missing" }, { status: 500 });
     }
 
-    const { data: publicData } = supabase
-      .storage
-      .from("phone-reports")
-      .getPublicUrl(pdfName);
-
-
-    console.log(formData.price);
-
-    // 4️⃣ Save DB record
     const { data, error: dbError } = await supabase
       .from("mobile_phones")
       .insert({
         ...formData,
         user_id,
         pictures: pictureUrls,
-        condition_score: condition_score,
-        damage_report_pdf: publicData.publicUrl,
+        condition_score,
+        damage_report_pdf: pdf_url,
       })
       .select()
       .single();
@@ -70,9 +50,8 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       id: data.id,
-      pdf_url: publicData.publicUrl,
+      pdf_url,
     });
-
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: "Something went wrong" }, { status: 500 });

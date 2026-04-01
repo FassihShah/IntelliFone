@@ -1,18 +1,18 @@
-from fastapi import FastAPI, UploadFile, File, Form,HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from typing import List, Optional
-from fastapi.responses import FileResponse
 import requests
 import os
 import shutil
 import uuid
 from pydantic import BaseModel
 from urllib.parse import urlparse
-from report_generator import generate_damage_report
+from report_generator import generate_damage_report, upload_report_to_supabase
 
 # --- Import your modules ---
 from models import UsedMobile
 from DamageDetection.Damage_Detection import analyze_phone_images
-from ConditionScoring.condition_scoring import compute_condition_score
+from PricePrediction.predict_price_service import run_pipeline
+from ConditionScoring.condition_scoring import compute_condition_score 
 from RecommendationEngine.recommendation_service import get_recommendations
 from models import ChatRequest, ChatResponse, ChatHistoryResponse
 from ChatBot.chatbot import generate_reply
@@ -24,6 +24,29 @@ from ChatBot.crud import (
 )
 
 app = FastAPI(title="IntelliFone AI Backend")
+YOLO_MODEL_PATH = os.path.join(os.path.dirname(__file__), "best3.pt")
+
+
+def validate_startup_configuration():
+    required_env_vars = [
+        "MONGO_CONNECTION_STRING",
+        "GOOGLE_API_KEY",
+        "SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
+    ]
+    missing = [name for name in required_env_vars if not os.getenv(name)]
+
+    if missing:
+        missing_list = ", ".join(missing)
+        raise RuntimeError(f"Missing required environment variables: {missing_list}")
+
+    if not os.path.exists(YOLO_MODEL_PATH):
+        raise RuntimeError(f"YOLO model file not found: {YOLO_MODEL_PATH}")
+
+
+@app.on_event("startup")
+def startup_checks():
+    validate_startup_configuration()
 
 
 
@@ -52,63 +75,70 @@ async def damage_detection(payload: DamageDetectionRequest):
 
     # Expected sides (order-based mapping)
     sides = ["front", "back", "left", "right", "top", "bottom"]
-
     saved = {side: None for side in sides}
+    report_path = None
 
-    # Download images
-    for idx, url in enumerate(payload.image_urls):
-        try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
+    try:
+        # Download images
+        for idx, url in enumerate(payload.image_urls):
+            try:
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
 
-            ext = os.path.splitext(urlparse(url).path)[1] or ".jpg"
-            file_name = f"{uuid.uuid4()}{ext}"
-            file_path = os.path.join("uploads", file_name)
+                ext = os.path.splitext(urlparse(url).path)[1] or ".jpg"
+                file_name = f"{uuid.uuid4()}{ext}"
+                file_path = os.path.join("uploads", file_name)
 
-            with open(file_path, "wb") as f:
-                f.write(response.content)
+                with open(file_path, "wb") as f:
+                    f.write(response.content)
 
-            saved[sides[idx]] = file_path
+                saved[sides[idx]] = file_path
 
-        except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to download image at index {idx}: {str(e)}"
-            )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to download image at index {idx}: {str(e)}"
+                )
 
-    # Run YOLO model
-    model_path = os.path.join(os.path.dirname(__file__), "best2.pt")
-    result = analyze_phone_images(
-        model_path,
-        saved,
-        show_output=False,
-        save_output=True
-    )
-    
-    os.makedirs("reports", exist_ok=True)
+        result = analyze_phone_images(
+            YOLO_MODEL_PATH,
+            saved,
+            show_output=False,
+            save_output=True
+        )
 
-    report_path = f"reports/damage_report_{uuid.uuid4()}.pdf"
+        os.makedirs("reports", exist_ok=True)
+        report_path = os.path.abspath(
+            os.path.join("reports", f"damage_report_{uuid.uuid4()}.pdf")
+        )
 
-    generate_damage_report(
-        damages=result["damages"],
-        output_dir="outputs",
-        report_path=report_path
-    )
-    report_path = os.path.abspath(
-    os.path.join("", report_path)
-   )
-    if os.path.exists("outputs"):
-        shutil.rmtree("outputs")
+        generate_damage_report(
+            damages=result["damages"],
+            output_dir="outputs",
+            report_path=report_path
+        )
 
-    if os.path.exists("uploads"):
-        shutil.rmtree("uploads")
-    print(f"[REPORT GENERATED] {report_path}")
-    result = compute_condition_score(result)
-    return {
-        "pdf_path": report_path,
-        "condition_score": result["condition_score"],
-        "ai_detected": result["ai_detected"]
-    }
+        report_url = upload_report_to_supabase(report_path)
+        scoring = compute_condition_score(result)
+
+        return {
+            "pdf_url": report_url,
+            "condition_score": scoring["condition_score"],
+            "ai_detected": scoring["ai_detected"]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Damage detection failed: {str(e)}")
+    finally:
+        if os.path.exists("outputs"):
+            shutil.rmtree("outputs")
+
+        if os.path.exists("uploads"):
+            shutil.rmtree("uploads")
+
+        if report_path and os.path.exists(report_path):
+            os.remove(report_path)
 
 
 # ============================================================
@@ -225,8 +255,12 @@ async def full_verification(
     # -------------------------------
     # Run YOLO Damage Detection
     # -------------------------------
-    model_path = os.path.join(os.path.dirname(__file__), "best2.pt")
-    damage_result = analyze_phone_images(model_path, uploads, show_output=False, save_output=False)
+    damage_result = analyze_phone_images(
+        YOLO_MODEL_PATH,
+        uploads,
+        show_output=False,
+        save_output=False
+    )
 
     # -------------------------------
     # Condition Scoring
