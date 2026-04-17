@@ -29,14 +29,24 @@ export default function Recommendations() {
         { cache: 'no-store' }
       );
 
-      const data = await res.json();
-      const cleanData = JSON.stringify(data).replace(/\*/g, ' ');
-      const parsedData = JSON.parse(cleanData);
+      if (!res.ok || !res.body) throw new Error('Stream failed');
 
-      setAiResponse(parsedData.recommendations || 'No recommendation received.');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      setLoading(false); // first byte arrived — stop spinner, start writing
+
+      let done = false;
+      while (!done) {
+        const { value, done: streamDone } = await reader.read();
+        done = streamDone;
+        if (value) {
+          const chunk = decoder.decode(value, { stream: true });
+          setAiResponse((prev) => prev + chunk.replace(/\*/g, ' '));
+        }
+      }
     } catch (error) {
       setAiResponse('Failed to get recommendations. Please try again.');
-    } finally {
       setLoading(false);
     }
   };

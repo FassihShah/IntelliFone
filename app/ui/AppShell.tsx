@@ -2,12 +2,14 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { supabase } from '../lib/supabaseClient';
-import { Smartphone, LogOut,Bookmark, MessageSquare,Inbox,UserCircle} from 'lucide-react';
+import { Smartphone, LogOut, Bookmark, MessageSquare, Inbox, UserCircle, Bot, Menu, X } from 'lucide-react';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<any>(null);
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+  const pathname = usePathname();
 
   React.useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -23,96 +25,197 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Close mobile menu on route change
+  React.useEffect(() => {
+    setIsMenuOpen(false);
+  }, [pathname]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     window.location.href = '/';
   };
 
+  const navLinks = [
+    { href: '/marketplace', label: 'Marketplace' },
+    { href: '/add', label: 'Sell' },
+    { href: '/recommendation', label: 'Recommendations' },
+    { href: '/about', label: 'About' },
+    { href: '/contactus', label: 'Contact Us' },
+  ];
+
+  const isActive = (href: string) => pathname === href;
+
   return (
     <div className="min-h-screen bg-black text-white">
       {/* Header */}
-      <header className="glass-panel sticky top-0 z-50 border-b border-gray-800"
-      style={{
-        background: "rgba(26, 26, 26, 0.8)",
-        backdropFilter: "blur(10px)",
-        border: "1px solid rgba(255, 255, 255, 0.1)",
+      <header
+        className="glass-panel sticky top-0 z-50 border-b border-gray-800"
+        style={{
+          background: 'rgba(14, 14, 16, 0.85)',
+          backdropFilter: 'blur(16px)',
+          borderBottom: '1px solid rgba(255,255,255,0.08)',
         }}
       >
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 text-xl font-bold">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+          {/* Logo */}
+          <Link href="/" className="flex items-center gap-2 text-xl font-bold shrink-0">
             <Smartphone className="text-[#f7f435]" />
             <span className="text-[#f7f435]">IntelliFone</span>
           </Link>
 
-          <nav className="hidden md:flex gap-6">
-            <Link href="/marketplace">Marketplace</Link>
-            <Link href="/add">Sell</Link>
-            <Link href="/recommendation">Recommendations</Link>
-            <Link href="/about">About</Link>
-            <Link href="/contactus">Contact Us</Link>
+          {/* Desktop Nav Links */}
+          <nav className="hidden md:flex gap-1">
+            {navLinks.map(({ href, label }) => (
+              <Link
+                key={href}
+                href={href}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  isActive(href)
+                    ? 'text-[#f7f435] bg-[#f7f435]/10'
+                    : 'text-gray-300 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                {label}
+              </Link>
+            ))}
           </nav>
 
-          <div className="hidden md:flex gap-3 items-center">
+          {/* Desktop Actions */}
+          <div className="hidden md:flex gap-2 items-center">
             {user ? (
               <>
-                <Link href="/chats" className="font-semibold">
-                  <Inbox className="w-4 h-4 inline-block mr-1" /> Inbox
+                {/* AI Chat */}
+                <Link
+                  href="/chat"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    isActive('/chat')
+                      ? 'bg-[#f7f435] text-black'
+                      : 'text-gray-300 hover:text-[#f7f435] hover:bg-[#f7f435]/10'
+                  }`}
+                >
+                  <Bot className="w-4 h-4" />
+                  <span>AI Chat</span>
                 </Link>
-                <Link href="/saved"
-                className='font-semibold'
-                ><Bookmark className="w-4 h-4 inline-block mr-1" /> Saved</Link>
-                <Link href="/profile" className="font-semibold"> 
-                   <UserCircle className="w-4 h-4 inline-block mr-1" />Profile
-                </Link>
-                {/* <span className="flex items-center gap-2">
-                  <User className="w-4 h-4" />
-                  {user.email}
-                </span> */}
-                
 
-                
-                
-                <button onClick={handleLogout} className="hover:text-red-400">
-                  <LogOut />
+                {/* Inbox */}
+                <Link
+                  href="/chats"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    isActive('/chats')
+                      ? 'bg-[#f7f435] text-black'
+                      : 'text-gray-300 hover:text-[#f7f435] hover:bg-[#f7f435]/10'
+                  }`}
+                >
+                  <Inbox className="w-4 h-4" />
+                  <span>Inbox</span>
+                </Link>
+
+                {/* Saved */}
+                <Link
+                  href="/saved"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    isActive('/saved')
+                      ? 'bg-[#f7f435] text-black'
+                      : 'text-gray-300 hover:text-[#f7f435] hover:bg-[#f7f435]/10'
+                  }`}
+                >
+                  <Bookmark className="w-4 h-4" />
+                  <span>Saved</span>
+                </Link>
+
+                {/* Profile */}
+                <Link
+                  href="/profile"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    isActive('/profile')
+                      ? 'bg-[#f7f435] text-black'
+                      : 'text-gray-300 hover:text-[#f7f435] hover:bg-[#f7f435]/10'
+                  }`}
+                >
+                  <UserCircle className="w-4 h-4" />
+                  <span>Profile</span>
+                </Link>
+
+                {/* Logout */}
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition-all"
+                >
+                  <LogOut className="w-4 h-4" />
                 </button>
               </>
             ) : (
               <>
-                <Link href="/signin">Login</Link>
-                <Link href="/signup" className="yellow-btn px-4 py-2 rounded">
+                <Link
+                  href="/signin"
+                  className="text-sm font-medium text-gray-300 hover:text-white px-3 py-1.5 rounded-lg hover:bg-white/5 transition-all"
+                >
+                  Login
+                </Link>
+                <Link
+                  href="/signup"
+                  className="px-4 py-2 rounded-lg text-sm font-semibold text-black"
+                  style={{ backgroundColor: '#f7f435' }}
+                >
                   Sign Up
                 </Link>
               </>
             )}
           </div>
 
-          {/* Mobile */}
-          <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="md:hidden">
-            ☰
+          {/* Mobile toggle */}
+          <button
+            onClick={() => setIsMenuOpen(!isMenuOpen)}
+            className="md:hidden p-2 rounded-lg text-gray-300 hover:bg-white/10 transition-all"
+            aria-label="Toggle menu"
+          >
+            {isMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
         </div>
 
+        {/* Mobile Menu */}
         {isMenuOpen && (
-          <div className="md:hidden px-4 py-4 border-t border-gray-800">
-            <Link href="/" className="block">Home</Link>
-            <Link href="/marketplace" className="block">Marketplace</Link>
-            <Link href="/sell" className="block">Sell</Link>
-            {user ? (
-              <button onClick={handleLogout} className="block mt-2">
-                Logout
-              </button>
-            ) : (
-              <Link href="/signin">Login</Link>
-            )}
-             <Link href="/chats" className="font-semibold">
-                  <Inbox className="w-4 h-4 inline-block mr-1" /> Inbox
+          <div className="md:hidden border-t border-gray-800 bg-[#0e0e10]">
+            <div className="px-4 py-3 flex flex-col gap-1">
+              {navLinks.map(({ href, label }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  className={`px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    isActive(href) ? 'text-[#f7f435] bg-[#f7f435]/10' : 'text-gray-300 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  {label}
                 </Link>
-                <Link href="/saved"
-                className='font-semibold'
-                ><Bookmark className="w-4 h-4 inline-block mr-1" /> Saved</Link>
-                <Link href="/profile" className="font-semibold"> 
-                   <UserCircle className="w-4 h-4 inline-block mr-1" />Profile
-              </Link>
+              ))}
+
+              <div className="my-2 border-t border-gray-800" />
+
+              {user ? (
+                <>
+                  <Link href="/chat" className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-300 hover:text-[#f7f435] hover:bg-[#f7f435]/10 transition-all">
+                    <Bot className="w-4 h-4" /> AI Chat
+                  </Link>
+                  <Link href="/chats" className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-300 hover:text-[#f7f435] hover:bg-[#f7f435]/10 transition-all">
+                    <Inbox className="w-4 h-4" /> Inbox
+                  </Link>
+                  <Link href="/saved" className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-300 hover:text-[#f7f435] hover:bg-[#f7f435]/10 transition-all">
+                    <Bookmark className="w-4 h-4" /> Saved
+                  </Link>
+                  <Link href="/profile" className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-300 hover:text-[#f7f435] hover:bg-[#f7f435]/10 transition-all">
+                    <UserCircle className="w-4 h-4" /> Profile
+                  </Link>
+                  <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition-all w-full text-left">
+                    <LogOut className="w-4 h-4" /> Logout
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link href="/signin" className="px-3 py-2.5 rounded-lg text-sm font-medium text-gray-300 hover:text-white hover:bg-white/5 transition-all">Login</Link>
+                  <Link href="/signup" className="px-3 py-2.5 rounded-lg text-sm font-semibold text-black text-center" style={{ backgroundColor: '#f7f435' }}>Sign Up</Link>
+                </>
+              )}
+            </div>
           </div>
         )}
       </header>

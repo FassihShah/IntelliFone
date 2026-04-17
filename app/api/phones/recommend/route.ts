@@ -1,6 +1,8 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-export async function GET(req: Request) {
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
 
@@ -14,27 +16,30 @@ export async function GET(req: Request) {
       );
     }
 
-    // 🔁 Call FastAPI backend
+    // 🔁 Call FastAPI streaming endpoint
     const response = await fetch(
-      `http://127.0.0.1:8000/recommend/?max_price=${max_price}&priority=${encodeURIComponent(
+      `http://127.0.0.1:8000/recommend-stream/?max_price=${max_price}&priority=${encodeURIComponent(
         priority
       )}`,
       {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { Accept: 'text/plain' },
         cache: 'no-store',
       }
     );
 
-    if (!response.ok) {
-      throw new Error('FastAPI request failed');
+    if (!response.ok || !response.body) {
+      throw new Error('FastAPI streaming request failed');
     }
 
-    const data = await response.json();
-
-    return NextResponse.json(data);
+    // Pipe the FastAPI stream straight back to the browser
+    return new Response(response.body, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no',
+      },
+    });
   } catch (error) {
     console.error(error);
     return NextResponse.json(

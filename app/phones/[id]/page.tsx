@@ -104,38 +104,40 @@ async function handleContact(receiverId: string) {
   const currentUserId = user?.id;
   if (!currentUserId) return;
 
-  // 1️⃣ Check if conversation already exists between A & B
-  const { data: existingConvo } = await supabase
-    .from("conversations")
-    .select("*")
+  // Don't allow chatting with yourself
+  if (currentUserId === receiverId) return;
+
+  // 1️⃣ Look for an existing conversation in BOTH orderings (A→B or B→A)
+  const { data: rows } = await supabase
+    .from("conversation")
+    .select("id")
     .or(
-      `user1_id.eq.${currentUserId},user2_id.eq.${receiverId}`
+      `and(user1_id.eq.${currentUserId},user2_id.eq.${receiverId}),and(user1_id.eq.${receiverId},user2_id.eq.${currentUserId})`
     )
-    .single();
+    .limit(1);
 
-  let conversation = existingConvo
+  let conversationId = rows?.[0]?.id ?? null;
 
-  // 2️⃣ If it doesn't exist, create it
-  if (!conversation) {
+  // 2️⃣ If none found, create a new one
+  if (!conversationId) {
     const { data: newConvo, error } = await supabase
       .from("conversation")
       .insert({
         user1_id: currentUserId,
         user2_id: receiverId,
       })
-      .select()
+      .select("id")
       .single();
 
     if (error) {
-      console.error("Failed to create conversation:", error)
-      return
+      console.error("Failed to create conversation:", error);
+      return;
     }
-
-    conversation = newConvo
+    conversationId = newConvo.id;
   }
 
-  // 3️⃣ Redirect
-  router.push(`/chats?conversation=${conversation.id}`)
+  // 3️⃣ Redirect to the (existing or new) conversation
+  router.push(`/chats?conversation=${conversationId}`);
 }
 
 

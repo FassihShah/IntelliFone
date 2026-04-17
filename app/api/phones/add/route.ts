@@ -25,28 +25,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "PDF path missing" }, { status: 500 });
     }
 
-    // 2️⃣ Read PDF from disk
-    const pdfBuffer = fs.readFileSync(fastapiData.pdf_path);
+    // // 2️⃣ Read PDF from disk
+    // const pdfBuffer = fs.readFileSync(fastapiData.pdf_path);
 
-    // 3️⃣ Upload to Supabase
-    const pdfName = `damage_reports/report_${Date.now()}.pdf`;
+    // // 3️⃣ Upload to Supabase
+    // const pdfName = `damage_reports/report_${Date.now()}.pdf`;
 
-    const { error: uploadError } = await supabase.storage
-      .from("phone-reports")
-      .upload(pdfName, pdfBuffer, {
-        contentType: "application/pdf",
-        upsert: true,
-      });
+    // const { error: uploadError } = await supabase.storage
+    //   .from("phone-reports")
+    //   .upload(pdfName, pdfBuffer, {
+    //     contentType: "application/pdf",
+    //     upsert: true,
+    //   });
 
-    if (uploadError) {
-      return NextResponse.json({ error: uploadError.message }, { status: 500 });
-    }
+    // if (uploadError) {
+    //   return NextResponse.json({ error: uploadError.message }, { status: 500 });
+    // }
 
-    const { data: publicData } = supabase
-      .storage
-      .from("phone-reports")
-      .getPublicUrl(pdfName);
-
+    
 
     console.log(formData.price);
 
@@ -58,7 +54,7 @@ export async function POST(req: Request) {
         user_id,
         pictures: pictureUrls,
         condition_score: condition_score,
-        damage_report_pdf: publicData.publicUrl,
+        damage_report_pdf: pdf_path, // Store the local path for now
       })
       .select()
       .single();
@@ -70,7 +66,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       id: data.id,
-      pdf_url: publicData.publicUrl,
+      pdf_url: pdf_path, // Return the local path for now
     });
 
   } catch (err) {
