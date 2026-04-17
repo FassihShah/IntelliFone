@@ -6,7 +6,7 @@ from pymongo import MongoClient
 import os
 import time
 import re
-from recommender_data_service import process_video
+from recommender_data_service import ensure_recommender_data_indexes, process_video
 
 # OpenAI imports
 from openai import OpenAI  
@@ -16,10 +16,12 @@ load_dotenv()
 # --- CONFIGURATION ---
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 MONGO_URI = os.getenv("MONGO_CONNECTION_STRING")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
-if not (YOUTUBE_API_KEY and MONGO_URI and OPENAI_API_KEY):
-    raise RuntimeError("Missing one of YOUTUBE_API_KEY, MONGO_CONNECTION_STRING, or OPENAI_API_KEY in env")
+if not (YOUTUBE_API_KEY and MONGO_URI and DEEPSEEK_API_KEY):
+    raise RuntimeError("Missing one of YOUTUBE_API_KEY, MONGO_CONNECTION_STRING, or DEEPSEEK_API_KEY in env")
 
 # --- CHANNELS TO MONITOR ---
 CHANNELS = {
@@ -27,6 +29,13 @@ CHANNELS = {
     "ReviewsPK": "UCs2CReSOxze9hUknRowMdAA",
     "VideoWaliSarkar": "UCheoCqHDwPcfS9Jrgz8siQw",
     "MAS TECH": "UC_k-Bk8mErWg6kchpkw6Asg"
+}
+
+CHANNEL_WEIGHTS = {
+    "Babloo Lahori": 1.2,
+    "ReviewsPK": 0.9,
+    "VideoWaliSarkar": 0.9,
+    "MAS TECH": 0.8
 }
 
 # --- DATABASE SETUP ---
@@ -37,8 +46,8 @@ videos_collection = db["videos"]
 # --- YOUTUBE SERVICE ---
 youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 
-# --- OPENAI CLIENT SETUP ---
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+# --- DEEPSEEK CLIENT SETUP ---
+deepseek_client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 
 def fetch_new_videos(channel_id):
     """Fetch latest videos from a channel in the last 7 days."""
@@ -84,28 +93,15 @@ If the title suggests a list but the number of phones is unclear, lean toward YE
     user_input = f"Title: {title}\n\nDescription: {description}"
 
     try:
-        resp = openai_client.responses.create(
-            model="gpt-4o",          # adjust if you want another model
-            input=[
+        resp = deepseek_client.chat.completions.create(
+            model=DEEPSEEK_MODEL,
+            messages=[
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_input}
             ],
-            max_output_tokens=20
+            max_tokens=20
         )
-        # The Responses API returns text in various places depending on version;
-        # prefer top-level output_text if present, else join output segments.
-        out_text = ""
-        if hasattr(resp, "output_text") and resp.output_text:
-            out_text = resp.output_text
-        else:
-            # fallback: try to join choices / content segments
-            segments = []
-            for item in getattr(resp, "output", []) or []:
-                # item may have 'content' list of dicts
-                for c in item.get("content", []):
-                    if isinstance(c, dict) and c.get("type") == "output_text":
-                        segments.append(c.get("text", ""))
-            out_text = " ".join(segments)
+        out_text = resp.choices[0].message.content or ""
 
         decision = out_text.strip().upper()
         # Accept "YES" if it appears at start to be lenient with trailing punctuation/newlines
@@ -118,6 +114,8 @@ If the title suggests a list but the number of phones is unclear, lean toward YE
 
 def run_youtube_monitor():
     """Main watcher logic."""
+    ensure_recommender_data_indexes()
+
     for name, channel_id in CHANNELS.items():
         videos = fetch_new_videos(channel_id)
         print(f"🔎 Checking channel: {name} ({len(videos)} new videos)")
@@ -154,7 +152,9 @@ def run_youtube_monitor():
                 process_video(
                     video_id=vid_id,
                     title=title,
-                    url=url
+                    url=url,
+                    channel=name,
+                    channel_weight=CHANNEL_WEIGHTS.get(name, 1.0)
                 )
                 videos_collection.update_one({"video_id": vid_id}, {"$set": {"processed": True}})
                 print("✅ Extraction complete!")

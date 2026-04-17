@@ -1,6 +1,4 @@
 .env
-.venv/
-.runtime/
 best1.pt
 best2.pt
 *.jpg

@@ -15,7 +15,6 @@ import re
 from models import UsedMobile
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
 
@@ -31,14 +30,27 @@ DB_NAME = "MobileDB"
 COLLECTION_NAME = "used_mobiles"
 client = MongoClient(MONGO_URI)
 db = client[DB_NAME]
+collection = db[COLLECTION_NAME]
 
-db[COLLECTION_NAME].create_index([("link", 1)], unique=True)   # Ensure link uniqueness, no duplicates
-db[COLLECTION_NAME].create_index([("extraction_date", 1)], expireAfterSeconds=5184000)   # 60 days TTL 
+def ensure_olx_indexes():
+    try:
+        collection.create_index([("link", 1)], unique=True)
+
+        for index_name, index_info in collection.index_information().items():
+            if index_info.get("key") == [("extraction_date", 1)] and "expireAfterSeconds" in index_info:
+                collection.drop_index(index_name)
+                print("Dropped old TTL index on extraction_date:", index_name)
+
+        collection.create_index([("extraction_date", 1)])
+    except Exception as e:
+        print("OLX index setup skipped/failed:", e)
 
 
 # LLM Setup
 llm = ChatOpenAI(
-    model="gpt-4o-mini",
+    model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
     temperature=0,
     max_tokens=1500
 )
@@ -173,38 +185,58 @@ combined_chain = combined_prompt | llm | StrOutputParser()
 # ============================================================
 # Rate Limit Handler
 # ============================================================
-last_gemini_call = 0
+last_llm_call = 0
 
 
 SCRAPINGBEE_API_KEY = os.getenv("SCRAPINGBEE_API_KEY")
 
+def direct_fetch(url):
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=30)
+        response.raise_for_status()
+        return response
+    except Exception as e:
+        print("Direct fetch failed:", e)
+        return None
+
+
 def fetch(url):
     """Proxy OLX requests through ScrapingBee to bypass blocking."""
-    api_url = (
-        f"https://app.scrapingbee.com/api/v1/"
-        f"?api_key={SCRAPINGBEE_API_KEY}"
-        f"&render_js=false"
-        f"&url={url}"
-    )
+    if not SCRAPINGBEE_API_KEY:
+        print("ScrapingBee API key missing. Falling back to direct request.")
+        return direct_fetch(url)
+
     try:
-        response = requests.get(api_url, timeout=30)
+        response = requests.get(
+            "https://app.scrapingbee.com/api/v1/",
+            params={
+                "api_key": SCRAPINGBEE_API_KEY,
+                "url": url,
+                "render_js": "false",
+                "country_code": "pk",
+                "block_resources": "true",
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
         return response
     except Exception as e:
         print("ScrapingBee fetch failed:", e)
-        return None
+        print("Trying direct request instead:", url)
+        return direct_fetch(url)
 
 
 
 def rate_limit_pause():
-    global last_gemini_call
+    global last_llm_call
     now = time.time()
-    elapsed = now - last_gemini_call
-    min_interval = 6  # Gemini calls every 6 seconds
+    elapsed = now - last_llm_call
+    min_interval = 6
 
     if elapsed < min_interval:
         time.sleep(min_interval - elapsed)
 
-    last_gemini_call = time.time()
+    last_llm_call = time.time()
 
 
 
@@ -354,6 +386,30 @@ def extract_data(data: dict, model, brand):
 # ============================================================
 # Scrape OLX Listings
 # ============================================================
+def title_matches_model(title: str, model_query: str, brand: str):
+    """
+    Cheap pre-filter before opening detail pages.
+    The LLM still does the final strict model check.
+    """
+    title_tokens = set(re.findall(r"[a-z0-9]+", title.lower()))
+    brand_tokens = set(re.findall(r"[a-z0-9]+", brand.lower()))
+    model_tokens = [
+        token
+        for token in re.findall(r"[a-z0-9]+", model_query.lower())
+        if token not in brand_tokens and token not in {"4g", "5g"}
+    ]
+
+    if not model_tokens:
+        return True
+
+    if all(token in title_tokens for token in model_tokens):
+        return True
+
+    compact_title = re.sub(r"[^a-z0-9]", "", title.lower())
+    compact_model = "".join(model_tokens)
+    return compact_model in compact_title
+
+
 def get_ads_from_page(page_num, model_query, brand):
 
     if brand.lower() not in model_query.lower():
@@ -361,17 +417,18 @@ def get_ads_from_page(page_num, model_query, brand):
     else:
         full_query = model_query
 
-    search_term = full_query.replace(" ", "-")
+    search_term = quote_plus(full_query).replace("+", "-")
     url = f"https://www.olx.com.pk/items/q-{search_term}?page={page_num}"
     print(f"Scraping Page URL: {url}")
 
-    scraper = requests.Session()
-    scraper.headers.update(HEADERS)
-    #res = fetch(url)
-    res = scraper.get(url)
+    res = fetch(url)
+    if not res:
+        return [], 0
+
     soup = BeautifulSoup(res.text, "html.parser")
 
     ads = soup.select("li[aria-label='Listing']")
+    ads_found = len(ads)
     listings = []
 
     for ad in ads:
@@ -389,8 +446,14 @@ def get_ads_from_page(page_num, model_query, brand):
             location = location_tag.text.strip()
             link = "https://www.olx.com.pk" + link_tag["href"]
 
-            #ad_res = fetch(link)
-            ad_res = scraper.get(link)
+            if not title_matches_model(title, model_query, brand):
+                print("Skipping detail fetch (title pre-filter):", title)
+                continue
+
+            ad_res = fetch(link)
+            if not ad_res:
+                continue
+
             ad_soup = BeautifulSoup(ad_res.text, "html.parser")
 
             desc_tag = ad_soup.select_one("div[aria-label='Description'] div._7a99ad24 span")
@@ -427,7 +490,7 @@ def get_ads_from_page(page_num, model_query, brand):
             print("Skipping Ad, Error:", e)
             continue
 
-    return listings
+    return listings, ads_found
 
 
 # ============================================================
@@ -443,14 +506,14 @@ def scrape_used_data(model: str, brand: str):
         while True:
             listings_count = 0
 
-            listings = get_ads_from_page(page_num, model, brand)
+            listings, ads_found = get_ads_from_page(page_num, model, brand)
 
             # We no longer store listings, we only count them
             for _ in listings:
                 listings_count += 1
                 count_saved += 1
 
-            if listings_count == 0:
+            if ads_found == 0:
                 print(f"No more listings on page {page_num}. Stopping.")
                 break
 
@@ -470,4 +533,4 @@ def scrape_used_data(model: str, brand: str):
 # ============================================================
 # TEST RUN
 # ============================================================
-#scrape_used_data("Pixel 6A", "Google")
+# scrape_used_data("Pixel 6A", "Google")

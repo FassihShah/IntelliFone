@@ -1,811 +1,246 @@
 # IntelliFone
 
-> **Final Year Project**: A comprehensive web and mobile platform for buying and selling used smartphones with AI-driven verification, damage detection, price prediction, and intelligent recommendations.
+IntelliFone is a smartphone marketplace and AI verification system for the Pakistani used-phone market. It combines a Next.js web app, a FastAPI AI backend, MongoDB-backed market datasets, Supabase storage/auth, YOLO damage detection, DeepSeek LLM extraction, OLX scraping, price prediction, and YouTube-based recommendations.
 
----
+## What It Does
 
-## 📋 Table of Contents
+- Lets sellers list used phones with images and verification data.
+- Detects visible damage from phone images using a YOLO segmentation model.
+- Converts damage into a 0-20 condition score.
+- Predicts used-phone price ranges from scraped OLX Pakistan listings.
+- Recommends phones from YouTube review data based on budget and priority.
+- Provides a smartphone-focused AI chatbot.
 
-- [Overview](#overview)
-- [System Architecture](#system-architecture)
-- [Technology Stack](#technology-stack)
-- [Features](#features)
-- [Project Structure](#project-structure)
-- [Prerequisites](#prerequisites)
-- [Installation & Setup](#installation--setup)
-- [Environment Configuration](#environment-configuration)
-- [Running the Application](#running-the-application)
-- [API Endpoints](#api-endpoints)
-- [AI/ML Backend Details](#aiml-backend-details)
-- [Progress Checklist](#progress-checklist)
-- [Contributing](#contributing)
-- [License](#license)
-- [Team](#team)
+## Repository Layout
 
----
-
-
-## 🎯 Overview
-
-**IntelliFone** is an intelligent marketplace platform designed specifically for the Pakistani smartphone resale market. It combines cutting-edge AI/ML technologies with a user-friendly interface to solve key problems in the used phone market:
-
-- **Trust Issues**: AI-powered damage detection and condition verification
-- **Pricing Uncertainty**: ML-based price prediction using real market data
-- **Information Asymmetry**: YouTube review-powered recommendation engine
-- **Market Transparency**: Real-time data collection from OLX Pakistan
-
-### Key Innovations
-
-1. **6-Angle Damage Detection**: YOLOv11-based computer vision analyzes phones from all angles
-2. **Weighted Condition Scoring**: Intelligent algorithm prioritizes screen damage over cosmetic issues
-3. **Pakistan-Specific Pricing**: Random Forest model trained on local market data
-4. **LLM-Powered Recommendations**: LLM-powered phone suggestions based on budget and priorities
-5. **Sensor Diagnostics Integration**: Hardware verification through mobile app testing
-
----
-
-## 🏗️ System Architecture
-
-```
-┌─────────────────────────────────────────────────┐
-│           Client Applications                   │
-│   ┌──────────────┐      ┌──────────────┐       │
-│   │  Next.js Web │      │ React Native │       │
-│   │  Application │      │  Mobile App  │       │
-│   └──────┬───────┘      └──────┬───────┘       │
-└──────────┼─────────────────────┼────────────────┘
-           │                     │
-┌──────────▼─────────────────────▼────────────────┐
-│            API Gateway Layer                    │
-│   ┌──────────────┐      ┌──────────────┐       │
-│   │  Next.js API │      │  FastAPI AI  │       │
-│   │    Routes    │      │   Service    │       │
-│   └──────┬───────┘      └──────┬───────┘       │
-└──────────┼─────────────────────┼────────────────┘
-           │                     │
-    ┌──────┼──────┬──────────────┼──────────┐
-    │      │      │              │          │
-┌───▼──┐ ┌─▼───┐ ┌▼────────┐ ┌──▼──────┐ ┌▼────────┐
-│Supa- │ │Fast │ │ MongoDB │ │ Render  │ │External │
-│base  │ │ API │ │  Atlas  │ │  Crons  │ │Services │
-│      │ │     │ │         │ │         │ │         │
-│•Auth │ │•AI  │ │•Scraped │ │•OLX     │ │•EmailJS │
-│•DB   │ │•ML  │ │ Data    │ │•YouTube │ │•YouTube │
-│•Store│ │     │ │•Reviews │ │ Watcher │ │•OpenAI  │
-└──────┘ └─────┘ └─────────┘ └─────────┘ └─────────┘
+```text
+IntelliFone/
+  web/                         Next.js frontend
+  ai-backend/                  FastAPI AI/ML backend
+    main.py                    API entrypoint
+    models.py                  shared Pydantic models
+    Dockerfile                 API-only Docker image
+    requirements.ai-backend.txt
+    DamageDetection/           YOLO inference
+    ConditionScoring/          damage-to-score logic
+    PricePrediction/           OLX-based price prediction
+    RecommendationEngine/      recommendation endpoint logic
+    DataCronJob/               OLX and YouTube scheduled jobs
+    ChatBot/                   MongoDB-backed AI assistant
+  CODEBASE_MODULE_ANALYSIS.md  detailed module-by-module architecture
 ```
 
----
+Use the files under `ai-backend/` for backend development. Any old root-level duplicate backend folders, if present, are not the active backend.
 
-## 💻 Technology Stack
+## Main Architecture
 
-### **Frontend (Web)**
-| Technology | Purpose | Version |
-|------------|---------|---------|
-| Next.js | React framework with App Router | 14.x |
-| TypeScript | Type-safe development | 5.x |
-| Tailwind CSS | Utility-first styling | 3.x |
-| React Query | Server state management | 5.x |
-| Supabase Client | Authentication & data fetching | Latest |
+```text
+Frontend web app
+  -> Supabase for auth, marketplace data, image storage
+  -> FastAPI ai-backend for AI verification, price prediction, recommendations, chatbot
 
-### **Frontend (Mobile)**
-| Technology | Purpose |
-|------------|---------|
-| React Native | Cross-platform mobile development |
-| TypeScript | Type-safe mobile development |
-| Expo | Development and build tooling |
+FastAPI ai-backend
+  -> MongoDB for OLX listings, YouTube recommendation data, chatbot history
+  -> Supabase Storage for generated damage reports
+  -> DeepSeek for LLM extraction, classification, recommendations, chatbot replies
+  -> ScrapingBee for OLX Pakistan proxy fetching when configured
 
-### **Backend (Web Services)**
-| Technology | Purpose |
-|------------|---------|
-| Supabase | Backend-as-a-Service (Auth, DB, Storage) |
-| PostgreSQL | Primary relational database |
-| Supabase Storage | Image and file storage |
-| Next.js API Routes | Backend API endpoints |
-
-### **Backend (AI/ML Service)**
-| Technology | Purpose | Version |
-|------------|---------|---------|
-| FastAPI | Python web framework | Latest |
-| Python | Primary language | 3.10+ |
-| YOLOv11 | Damage detection (Ultralytics) | Latest |
-| Scikit-learn | Random Forest price prediction | 1.3+ |
-| OpenAI GPT-4o | LLM for data processing | Latest |
-| Google Gemini | Alternative LLM | 2.5 Flash |
-| MongoDB | NoSQL database for AI data | Latest |
-| BeautifulSoup | Web scraping | 4.x |
-| Uvicorn | ASGI server | Latest |
-
-### **Third-Party Services**
-- **EmailJS**: Contact form email delivery
-- **YouTube Data API**: Video and transcript extraction
-- **OpenAI API**: Natural language processing
-- **Google Gemini API**: Alternative LLM processing
-
----
-
-## ✨ Features
-
-### **For Sellers**
--  **6-Image Upload System**: Front, back, left, right, top, bottom angles
--  **AI Damage Detection**: Automatic identification of cracks, dots, and lines
--  **Condition Scoring**: 0-20 scale based on weighted damage analysis
--  **Smart Price Suggestion**: ML-based price prediction using market data
--  **Easy Listing Creation**: Simple form with image upload to Supabase Storage
--  **Seller Dashboard**: Manage listings and view buyer inquiries
-
-### **For Buyers**
--  **Advanced Search & Filters**: Search by brand, model, storage, price range
--  **AI Verification Badge**: See which phones have been AI-verified
--  **Detailed Product Pages**: High-quality images, specs, seller info
--  **Smart Recommendations**: Budget and priority-based suggestions
--  **Similar Phones**: AI-powered related product discovery
--  **Direct Communication**: Built-in chat with sellers
-
-### **AI/ML Capabilities**
--  **Damage Detection Module**: YOLOv11 segmentation for 3 damage classes
--  **Condition Scoring Engine**: Weighted algorithm (screen: 1.0, back: 0.6, sides: 0.3)
--  **Price Prediction Model**: Random Forest trained on OLX Pakistan data
--  **Recommendation Engine**: LLM-powered analysis of YouTube tech reviews
--  **Market Data Collection**: Automated OLX scraping with LLM verification
-
-### **Additional Features**
--  **Google OAuth Integration**: Seamless authentication
--  **Contact Form**: EmailJS-powered support system
--  **Responsive Design**: Mobile-first approach with Tailwind CSS
--  **Real-time Search**: Instant marketplace filtering
--  **Modern UI/UX**: Glass-morphism, neon effects, smooth animations
-
----
-
-## 📁 Project Structure
-
-```
-intellifone/
-│
-├── web/                                    # Next.js Web Application
-│   ├── app/
-│   │   ├── home/
-│   │   │   └── page.tsx                       # Landing page
-│   │   ├── marketplace/
-│   │   │   └── page.tsx                       # Product listings with filters
-│   │   ├── add/
-│   │   │   └── page.tsx                       # Sell phone (6-image upload)
-│   │   ├── phones/
-│   │   │   └── [id]/
-│   │   │       └── page.tsx                   # Product detail page
-│   │   ├── recommendation/
-│   │   │   └── page.tsx                       # AI recommendations
-│   │   ├── about/
-│   │   │   └── page.tsx                       # About page
-│   │   ├── helpcenter/
-│   │   │   └── page.tsx                       # Help & FAQs
-│   │   ├── termsofservice/
-│   │   │   └── page.tsx                       # Terms of service
-│   │   ├── privacypolicy/
-│   │   │   └── page.tsx                       # Privacy policy
-│   │   ├── components/
-│   │   │   ├── SearchBar.tsx                  # Search component
-│   │   │   ├── card/
-│   │   │   │   └── ProductCard.tsx            # Phone listing card
-│   │   │   └── auth/
-│   │   │       └── GoogleButton.tsx           # Google OAuth button
-│   │   └── api/
-│   │       ├── phones/
-│   │       │   ├── list/
-│   │       │   │   └── route.ts               # GET all phones
-│   │       │   ├── add/
-│   │       │   │   └── route.ts               # POST new phone
-│   │       │   └── recommend/
-│   │       │       └── route.ts               # GET recommendations (proxy to FastAPI)
-│   │       └── users/
-│   │           └── list/
-│   │               └── route.ts               # GET all users
-│   ├── lib/
-│   │   ├── supabaseClient.ts                  # Client-side Supabase setup
-│   │   └── supabaseAdmin.ts                   # Server-side Supabase (service role)
-│   ├── providers/
-│   │   └── ClientProvider.tsx                 # React Query provider
-│   ├── public/                                # Static assets
-│   ├── styles/                                # Global styles
-│   ├── .env.local                             # Environment variables
-│   ├── next.config.js                         # Next.js configuration
-│   ├── tailwind.config.js                     # Tailwind CSS configuration
-│   ├── tsconfig.json                          # TypeScript configuration
-│   └── package.json                           # Dependencies
-│
-├── ai-backend/                                # FastAPI AI/ML Service
-│   ├── ConditionScoring/
-│   │   └── condition_scoring.py               # Condition Scoring algorithm
-│   ├── DamageDetection/
-│   │   ├── Damage_Detection_Training.ipynb    # Model training notebook
-│   │   ├── Damage_Detection.py                # Damage Detection Service
-│   │   └── best.pt                            # model weights
-│   ├── DataCronJob/
-│   │   ├── cron_scraper.py                    # Scheduled OLX data collection
-│   │   ├── olx_scraper_service.py             # OLX page scraping logic
-│   │   ├── recommender_data_service.py        # Process YouTube review data
-│   │   └── youtube_watcher_service.py         # Monitor YouTube channels
-│   ├── PricePrediction/
-│   │   └── predict_price_service.py           # Random Forest price prediction
-│   ├── RecommendationEngine/
-│   │   └── recommendation_service.py          # LLM-powered recommendations
-│   ├── app.py                                 # Main FastAPI application
-│   ├── models.py                              # Shared data models
-│   ├── .env                                   # Environment variables (API keys, DB)
-│   ├── .gitignore                             # Git ignore rules
-│   ├── README.md                              # AI/ML backend documentation
-│   └── requirements.txt                       # Python dependencies
-│
-└── README.md                                  # Main project documentation
-
+Separate cron jobs
+  -> OLX scraper writes used_mobiles into MongoDB
+  -> YouTube watcher writes videos and phones into MongoDB
 ```
 
----
+## AI Backend Features
 
-## 📋 Prerequisites
+| Module | Purpose |
+| --- | --- |
+| `DamageDetection` | Runs YOLO on phone images and returns detected cracks, dots, and lines |
+| `ConditionScoring` | Converts damage JSON into a condition score and AI damage flags |
+| `PricePrediction` | Trains a Random Forest from matching OLX listings and predicts price range |
+| `DataCronJob/olx_scraper_service.py` | Scrapes OLX listings with ScrapingBee-first, direct-fetch fallback |
+| `DataCronJob/cron_scraper.py` | Round-robin scheduled OLX scraper by brand/model |
+| `DataCronJob/youtube_watcher_service.py` | Monitors YouTube channels for list-style phone recommendation videos |
+| `DataCronJob/recommender_data_service.py` | Extracts phone recommendations from transcripts |
+| `RecommendationEngine` | Ranks candidate phones for budget/priority requests |
+| `ChatBot` | Smartphone-focused assistant with MongoDB conversation history |
 
-### **System Requirements**
-- **Node.js**: v18.x or higher
-- **Python**: 3.10 or higher
-- **npm** or **yarn**: Latest version
-- **MongoDB**: v6.x or higher (for AI backend)
-- **Git**: For version control
+## Required Services
 
-### **Required Accounts**
-1. **Supabase Account**: [supabase.com](https://supabase.com)
-   - Create a new project
-   - Enable Authentication (Google OAuth)
-   - Create storage bucket: `phone-images`
-   
-2. **OpenAI Account**: [platform.openai.com](https://platform.openai.com)
-   - Generate API key for GPT-4o access
-   
-3. **Google Cloud Account**: [console.cloud.google.com](https://console.cloud.google.com)
-   - Enable YouTube Data API v3
-   - Enable Gemini API (optional)
+- MongoDB Atlas or local MongoDB
+- Supabase project with Storage bucket for reports
+- DeepSeek API key
+- YouTube Data API key for the YouTube watcher
+- ScrapingBee API key if OLX needs Pakistan proxy access
 
-4. **MongoDB Atlas**: [mongodb.com/cloud/atlas](https://www.mongodb.com/cloud/atlas)
-   - Create free cluster
-   - Get connection string
+## AI Backend Environment
 
----
+Create `ai-backend/.env`:
 
-## 🚀 Installation & Setup
-
-### **1. Clone the Repository**
-
-```bash
-git clone https://github.com/FassihShah/IntelliFone.git
-cd IntelliFone
-```
-
-### **2. Web Application Setup**
-
-```bash
-# Navigate to web directory
-cd web
-
-# Install dependencies
-npm install
-# or
-yarn install
-
-# Create environment file
-cp .env.example .env.local
-
-# Edit .env.local with your credentials (see Environment Configuration section)
-```
-
-### **3. AI/ML Backend Setup**
-
-```bash
-# Navigate to AI backend directory
-cd ../ai-backend
-
-# Create virtual environment
-python -m venv venv
-
-# Activate virtual environment
-# On Windows:
-venv\Scripts\activate
-# On macOS/Linux:
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Download YOLOv11 model (if not included)
-# Place best3.pt in models/ directory
-
-# Create environment file
-cp .env.example .env
-
-# Edit .env with your credentials (see Environment Configuration section)
-```
-
----
-
-## 🔐 Environment Configuration
-
-### Web Application (.env.local)
 ```env
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+MONGO_CONNECTION_STRING=mongodb+srv://USER:PASSWORD@HOST/MobileDB
 
-# EmailJS
-NEXT_PUBLIC_EMAILJS_SERVICE_ID=your_service_id
-NEXT_PUBLIC_EMAILJS_TEMPLATE_ID=your_template_id
-NEXT_PUBLIC_EMAILJS_PUBLIC_KEY=your_public_key
+DEEPSEEK_API_KEY=your_deepseek_key
+DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_BASE_URL=https://api.deepseek.com
 
-# AI Backend
-NEXT_PUBLIC_AI_BACKEND_URL=http://localhost:8000
-```
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+SUPABASE_REPORTS_BUCKET=phone-reports
+SUPABASE_REPORTS_FOLDER=damage_reports
 
-### AI Backend (.env)
-```env
-# OpenAI
-OPENAI_API_KEY=sk-your_openai_key
-
-# MongoDB
-MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/intellifone
-
-# YouTube
 YOUTUBE_API_KEY=your_youtube_api_key
+SCRAPINGBEE_API_KEY=your_scrapingbee_key
 
-# Optional
-GEMINI_API_KEY=your_gemini_key
+ALLOWED_ORIGINS=http://localhost:3000
+MAX_IMAGE_BYTES=10485760
 ```
 
----
+Notes:
 
-## 🎮 Running the Application
+- `SCRAPINGBEE_API_KEY` is optional, but useful for OLX Pakistan.
+- `DEEPSEEK_MODEL` defaults to `deepseek-chat`.
+- `DEEPSEEK_BASE_URL` defaults to `https://api.deepseek.com`.
+- `ALLOWED_ORIGINS` is comma-separated for deployment, for example:
 
-### **Development Mode**
+```env
+ALLOWED_ORIGINS=https://your-frontend.vercel.app,http://localhost:3000
+```
 
-#### **Start Web Application**
+## Run AI Backend Locally
+
+```powershell
+cd ai-backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.ai-backend.txt
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Open:
+
+- API root: `http://localhost:8000/`
+- Health check: `http://localhost:8000/health`
+- FastAPI docs: `http://localhost:8000/docs`
+
+## Run Cron Jobs Separately
+
+Cron jobs are intentionally separate from the FastAPI API process. Do not run them inside `main.py` or inside the web server process.
+
+OLX scraper:
+
+```powershell
+cd ai-backend
+.\.venv\Scripts\python.exe DataCronJob\cron_scraper.py
+```
+
+YouTube watcher:
+
+```powershell
+cd ai-backend
+.\.venv\Scripts\python.exe DataCronJob\youtube_watcher_service.py
+```
+
+Suggested deployment schedules:
+
+| Job | Command | Suggested Frequency |
+| --- | --- | --- |
+| OLX scraper | `python DataCronJob/cron_scraper.py` | every 6-12 hours or daily |
+| YouTube watcher | `python DataCronJob/youtube_watcher_service.py` | every 6-12 hours or daily |
+
+For free/cheap cron hosting, GitHub Actions is usually enough. For more reliable scheduled jobs, use Render Cron Jobs or a small VPS cron/systemd timer.
+
+## Docker
+
+The Dockerfile builds the API service only.
+
+```powershell
+cd ai-backend
+docker build -t intellifone-ai-backend .
+docker run --env-file .env -p 8000:8000 intellifone-ai-backend
+```
+
+The Docker image installs `requirements.ai-backend.txt` and starts:
 
 ```bash
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+Deploy cron jobs as separate scheduled commands or separate services.
+
+## Main API Endpoints
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/` | GET | Welcome response |
+| `/health` | GET | Lightweight health check |
+| `/damage-detection/` | POST | Download image URLs, run YOLO, create PDF report, return condition score |
+| `/condition-scoring/` | POST | Score existing damage JSON |
+| `/price-prediction/` | POST | Predict price range from phone details and condition |
+| `/full-verification/` | POST | Upload images, detect damage, score condition, predict price |
+| `/recommend/` | GET | Recommend phones by budget and priority |
+| `/chat` | POST | Smartphone AI assistant |
+| `/chat/{conversation_id}` | GET | Fetch saved assistant chat history |
+
+## Current Backend Hardening
+
+- OLX scraper test execution is commented, so imports do not start scraping.
+- Cron jobs run separately from the API deployment.
+- MongoDB index creation is explicit and wrapped in safe setup functions.
+- API startup prepares only API-needed indexes.
+- OLX and YouTube cron scripts prepare their own indexes before running.
+- Damage detection uses per-request temporary folders.
+- Image uploads/downloads have content-type and size checks.
+- FastAPI CORS is controlled by `ALLOWED_ORIGINS`.
+- `/health` exists for deployment health checks.
+
+## Data Retention
+
+OLX pricing data:
+
+- Stored in `MobileDB.used_mobiles`.
+- Older listings are intentionally preserved.
+- Price prediction uses latest 60-day listings first, then older listings if recent data is too small.
+
+YouTube recommendation data:
+
+- Stored in `MobileDB.phones` and `MobileDB.videos`.
+- Phone recommendation records expire after 60 days because recommendation content gets stale.
+
+## Frontend
+
+The frontend lives in `web/`.
+
+Typical local setup:
+
+```powershell
 cd web
+npm install
 npm run dev
-# or
-yarn dev
-
-# Access at: http://localhost:3000
 ```
 
-#### **Start AI/ML Backend**
+Set the frontend AI backend URL to the FastAPI deployment/local URL according to the frontend environment variables used in `web/`.
 
-```bash
-cd ai-backend
+## Deployment Recommendation
 
-# Activate virtual environment
-source venv/bin/activate  # macOS/Linux
-# or
-venv\Scripts\activate     # Windows
+Cheapest practical split:
 
-# Run FastAPI server
-uvicorn app:app --reload --host 0.0.0.0 --port 8000
-
-# Access API docs at: http://localhost:8000/docs
+```text
+Frontend: Vercel
+AI API: Koyeb free, Render free/starter, Railway hobby, or small VPS
+Database: MongoDB Atlas M0 to start
+Cron jobs: GitHub Actions free or Render Cron Jobs
+Reports/images: Supabase Storage
 ```
 
-#### **Start Scraping Services (Optional)**
+For a more stable low-cost setup:
 
-```bash
-cd ai-backend
-
-# Run OLX scraper cron job
-python cron_scraper.py
-
-# Run YouTube watcher
-python youtube_watcher_service.py
+```text
+Frontend: Vercel
+AI API: Render Starter / Railway Hobby / small VPS
+Cron jobs: Render Cron Jobs or VPS cron
+MongoDB: Atlas M0 first, upgrade when storage/traffic grows
 ```
 
-### **Production Mode**
+## More Details
 
-#### **Web Application**
-
-```bash
-cd web
-
-# Build for production
-npm run build
-
-# Start production server
-npm run start
-```
-
-#### **AI/ML Backend**
-
-```bash
-cd ai-backend
-
-# Run with production settings
-gunicorn app:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
-```
-
----
-
-## 📡 API Endpoints
-
-### Web API (Next.js)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/phones/list` | GET | Get all phone listings |
-| `/api/phones/add` | POST | Create new listing |
-| `/api/phones/recommend` | GET | Get recommendations |
-| `/api/users/list` | GET | Get all users |
-
-### AI/ML API (FastAPI)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/damage-detection` | POST | Detect damages from images |
-| `/condition-scoring` | POST | Calculate condition score |
-| `/price-prediction` | POST | Predict price range |
-| `/full-verification` | POST | Complete verification pipeline |
-| `/recommend` | GET | Get phone recommendations |
-
----
-
-## 🤖 AI/ML Backend Details
-
-### **Module 1: Damage Detection**
-
-**Technology:** YOLOv8 Segmentation Model
-
-**Process:**
-1. Receives 6 images (front, back, left, right, top, bottom)
-2. Runs YOLOv11 inference on each image
-3. Detects 3 damage classes:
-   - **Crack**: Significant screen/body cracks
-   - **Dot**: Small impact points
-   - **Line**: Minor scratches or hairline cracks
-4. Measures damage size:
-   - Cracks/Lines: Length in pixels
-   - Dots: Area in pixels²
-
-**Output Format:**
-```python
-{
-  "damages": {
-    "front": {
-      "crack": [{"length_px": 345.6, "bbox": [...]}],
-      "dot": [{"area_px": 1158.8, "bbox": [...]}]
-    },
-    # ... other sides
-  }
-}
-```
-
-**Key Files:**
-- `Damage_Detection.py`: Main detection logic
-- `models/yolov8_damage.pt`: Trained model weights
-
----
-
-### **Module 2: Condition Scoring**
-
-**Algorithm:** Weighted Severity Scoring
-
-**Side Weights:**
-- **Front (Screen)**: 1.0 (highest priority)
-- **Back**: 0.6
-- **Sides (L/R/T/B)**: 0.3 (cosmetic)
-
-**Severity Weights:**
-- **Crack**: 3.0 (major)
-- **Line**: 1.5 (medium)
-- **Dot**: 0.8 (minor)
-
-**Key Files:**
-- `condition_scoring.py`: Scoring algorithm implementation
-
----
-
-### **Module 3: Price Prediction**
-
-**Model:** Random Forest Regressor
-
-**Features (18 total):**
-1. RAM (encoded)
-2. Storage (encoded)
-3. Condition Score (0-20)
-4. PTA Approved (boolean)
-5. Screen Crack (boolean)
-6. Panel Dot (boolean)
-7. Panel Line (boolean)
-8-17. Sensor Status (camera, wifi, bluetooth, etc.)
-18. Market Price (per model)
-
-**Training Data:**
-- Source: OLX Pakistan scraped listings
-- Update Frequency: Weekly via cron job
-- TTL: 60 days
-
-**Price Band Calculation:**
-```python
-IQR = Q3 - Q1
-uncertainty = IQR / median_price
-price_min = predicted - (uncertainty × predicted)
-price_max = predicted + (uncertainty × predicted)
-```
-
-**Key Files:**
-- `predict_price_service.py`: Prediction service
-- `cron_scraper.py`: Data collection
-
----
-
-### **Module 4: Market Data Collection**
-
-**Process Flow:**
-
-1. **OLX Scraping**
-   - Target: OLX Pakistan mobile listings
-   - Batch size: 10 pages per run
-   - Frequency: Daily via cron
-
-2. **LLM Verification**
-   - Uses GPT-4o or Gemini
-   - Verifies brand/model accuracy
-   - Extracts structured data
-
-3. **Data Storage**
-   - MongoDB with 60-day TTL
-   - Indexed by brand/model and ads id
-   - Used for model training
-
-**Key Files:**
-- `olx_scraper_service.py`: Page-level scraping
-- `cron_scraper.py`: Batch scheduler
-
----
-
-### **Module 5: Recommendation Engine**
-
-**Pipeline:**
-
-1. **YouTube Monitoring**
-   - Tracks 4-5 Pakistani tech YouTubers
-   - Detects new phone review videos
-   - Checks for "top phones" / "best phones" format
-
-2. **Transcript Extraction**
-   - YouTube Data API for captions
-   - Whisper fallback for non-captioned videos
-   - Language: English & Urdu support
-
-3. **LLM Processing**
-   - GPT-4o analyzes transcript
-   - Extracts:
-     - Phone names
-     - Price ranges (PKR)
-     - Pros & Cons
-     - Reviewer opinions
-     - Video timestamps
-
-4. **Data Storage**
-   - MongoDB collection: `youtube_reviews`
-   - Indexed by phone name
-   - Includes video links and sources
-
-5. **Query Matching**
-   - User provides budget + priority
-   - LLM ranks phones based on:
-     - Price fit
-     - Priority match (camera/gaming/battery)
-     - Reviewer consensus
-   - Returns formatted recommendations
-
-**Key Files:**
-- `youtube_watcher_service.py`: Video monitoring
-- `recommender_data_service.py`: Transcript processing
-- `recommendation_service.py`: Query matching
-
----
-
-### **Cron Jobs & Automation**
-
-**Scheduled Tasks:**
-
-1. **OLX Data Collection**
-   - Frequency: Daily at 2:00 AM
-   - Batch size: 100 listings
-   - Purpose: Keep price model trained on fresh data
-
-2. **YouTube Monitoring**
-   - Frequency: Every week
-   - Checks: New videos from tracked channels
-   - Purpose: Update recommendation database
-
-
----
-
-## Progress Checklist
-
-
-### 🖥️ Web Application (Frontend)
-
-#### Completed
-- [x] Landing page  
-- [x] Marketplace listing page  
-- [x] Search & filtering  
-- [x] Phone detail pages  
-- [x] Sell phone interface  
-- [x] Image upload UI  
-- [x] AI recommendation display  
-- [x] Google OAuth authentication  
-- [x] User profile management  
-- [x] Contact Us page  
-- [x] About, Terms & Privacy pages  
-- [x] Fully responsive design (Tailwind CSS)  
-
-#### Remaining
-- [ ] Final backend integration testing  
-- [ ] UI polishing & validation handling  
-
----
-
-### 📱 Mobile Application (Frontend)
-
-#### Completed
-- [x] Complete mobile UI  
-- [x] Sell phone flow UI  
-- [x] Image upload screens  
-- [x] Recommendation screens  
-- [x] Authentication & profile UI  
-
-#### Remaining
-- [ ] Backend API integration  
-- [ ] Sensor diagnostics integration  
-- [ ] Final testing on real devices  
-
----
-
-### ⚙️ Backend (Web & API)
-
-#### Completed
-- [x] Core backend architecture  
-- [x] Supabase authentication  
-- [x] Marketplace APIs  
-- [x] User profile APIs  
-- [x] Image storage (Supabase Storage)  
-- [x] Frontend ↔ backend integration (mostly complete)  
-
-#### Remaining
-- [ ] Mobile app API integration  
-- [ ] Final API testing & optimization  
-
----
-
-### 🧠 AI / ML Backend (Core Project Contribution)
-
-#### Completed
-- [x] Custom dataset collection (no public dataset available)  
-- [x] Manual data annotation (Roboflow)  
-- [x] YOLO-based damage detection model  
-- [x] Multi-side phone image analysis  
-- [x] Weighted condition scoring algorithm (0–20)  
-- [x] AI-based damage flags extraction  
-- [x] Random Forest price prediction model  
-- [x] Condition score integration into price prediction  
-- [x] Market-aware dynamic price range (no hardcoding)  
-- [x] LLM-based recommendation engine  
-- [x] FastAPI-based AI services  
-- [x] MongoDB integration  
-- [x] Continuous improvement pipeline  
-
-### Ongoing
-- [ ] Dataset expansion  
-- [ ] Annotation refinement  
-- [ ] Damage detection accuracy improvement  
-
----
-
-### 🕷️ Data Collection & Scraping
-
-#### Completed
-- [x] OLX scraper for used mobile listings  
-- [x] Brand & model–based scraping  
-- [x] LLM-based model verification  
-- [x] Condition & price normalization  
-- [x] MongoDB storage with TTL indexing  
-- [x] Cron-based scraping (Render)  
-- [x] YouTube review watcher  
-- [x] Transcript extraction for recommendations  
-
-#### Known Limitations
-- [ ] OLX rate limiting optimization  
-
----
-
-### 🗄️ Databases
-
-#### Completed
-- [x] PostgreSQL schema (Supabase)  
-- [x] MongoDB collections for AI/ML data  
-- [x] Indexes & TTL policies  
-- [x] Secure storage configuration  
-
----
-
-### ☁️ Deployment & Infrastructure
-
-#### Completed
-- [x] AI services deployed on Render  
-- [x] Cron jobs running on Render  
-- [x] Environment variable management  
-
-#### Planned
-- [ ] Full AWS deployment  
-- [ ] Docker-based production setup  
-
----
-
-### ⚠️ Known Technical Limitations
-
-- [ ] Damage detection still improving with more data  
-- [ ] Price prediction less accurate for rare models  
-- [ ] OLX scraper needs rate-limit optimization  
-- [ ] Mobile sensor diagnostics not fully integrated  
-
-
----
-
-## 🤝 Contributing
-
-1. **Fork the repository**
-```bash
-git clone https://github.com/FassihShah/IntelliFone.git
-cd IntelliFone
-git checkout -b feature/your-feature-name
-```
-
-2. **Make changes and test**
-```bash
-# Web app
-cd fyp-web
-npm run dev
-npm run test
-
-# AI backend
-cd ai-backend
-pytest tests/
-```
-
-3. **Commit with conventional commits**
-```bash
-git commit -m "feat: add new damage detection class"
-```
-
-4. **Push and create pull request**
-```bash
-git push origin feature/your-feature-name
-```
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 👥 Team
-
-**IntelliFone Development Team**
-- Final Year Project - 2025
-- Software Engineering Department
-- PUCIT
-
----
-
-
-
----
-
-**Built with ❤️ for the Pakistani smartphone market**
+Read `CODEBASE_MODULE_ANALYSIS.md` for the full module-by-module explanation of how the scraper, price prediction, damage detection, recommendation engine, and chatbot work.

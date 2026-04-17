@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for caching
+# Copy API/runtime requirements first for caching
 COPY requirements.txt .
 
 # Upgrade pip
@@ -29,8 +29,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy entire project
 COPY . .
 
-# Create runtime folders
-RUN mkdir -p uploads reports outputs
+# Create runtime folder used by model/config libraries
+RUN mkdir -p .runtime
 
 # Expose FastAPI port
 EXPOSE 8000

@@ -2,7 +2,7 @@
 
 from dotenv import load_dotenv
 from pymongo import MongoClient
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 import os
 from pydantic import BaseModel, Field
 
@@ -14,10 +14,20 @@ client = MongoClient(MONGO_URI)
 db = client["MobileDB"]
 recommended_collection = db["phones"]
 
+def ensure_recommendation_indexes():
+    try:
+        recommended_collection.create_index([("price_range", 1)])
+        recommended_collection.create_index([("source_channel", 1)])
+        recommended_collection.create_index([("source_weight", -1)])
+    except Exception as e:
+        print("Recommendation index setup skipped/failed:", e)
 
-model = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    api_key=os.getenv("GOOGLE_API_KEY")
+
+model = ChatOpenAI(
+    model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+    temperature=0.3
 )
 
 
@@ -31,9 +41,20 @@ def get_recommendations(max_price: float, priority: str):
     """    Recommend phones under a price limit based on user priority.
     """
     phones = list(recommended_collection.find({
-        "price_range": {"$lte": max_price + 5000},
-        "price_range": {"$gte": max_price - 5000}
-    }))
+        "price_range": {
+            "$ne": None,
+            "$lte": max_price
+        }
+    }).sort("price_range", -1).limit(25))
+
+    if not phones:
+        phones = list(recommended_collection.find({
+            "price_range": {
+                "$ne": None,
+                "$gte": max_price - 10000,
+                "$lte": max_price + 5000
+            }
+        }).sort("price_range", 1).limit(25))
 
     if not phones:
         return {"recommendations": "No phones found in this price range."}
@@ -42,6 +63,9 @@ def get_recommendations(max_price: float, priority: str):
     for idx, phone in enumerate(phones, 1):
         phone_name = phone.get("phone_name", "Unknown Phone")
         desc = phone.get("description", "No description available")
+        source_channel = phone.get("source_channel") or "Unknown channel"
+        source_weight = phone.get("source_weight", 1.0)
+        desc = f"{desc} Source: {source_channel}. Source weight: {source_weight}"
         price_range = phone.get("price_range", {})
         price_str = str(price_range) if price_range else "Price not available"
         candidates.append(f"{idx}. {phone_name} – {desc} – {price_str}")
@@ -81,4 +105,4 @@ Keep explanations concise and structured in short paragraphs.
 
 
     response = model.invoke(prompt)
-    return {"recommendations": response.text}
+    return {"recommendations": response.content}

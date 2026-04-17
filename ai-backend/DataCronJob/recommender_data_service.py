@@ -6,7 +6,7 @@ from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, No
 from deep_translator import GoogleTranslator
 from datetime import datetime
 from pymongo import MongoClient
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 import os
 from dotenv import load_dotenv
 
@@ -19,8 +19,26 @@ videos_collection = db["videos"]
 phones_collection = db["phones"]
 
 
-# Expire documents 60 days after created_at
-phones_collection.create_index("created_at", expireAfterSeconds=60 * 24 * 60 * 60)
+def ensure_recommender_data_indexes():
+    try:
+        # Expire recommendation source data 60 days after created_at.
+        phones_collection.create_index("created_at", expireAfterSeconds=60 * 24 * 60 * 60)
+        phones_collection.create_index([("price_range", 1)])
+        phones_collection.create_index([("phone_name_normalized", 1)])
+        phones_collection.create_index([("source_channel", 1)])
+        phones_collection.create_index([("source_weight", -1)])
+        phones_collection.create_index(
+            [("video_id", 1), ("phone_name_normalized", 1)],
+            unique=True,
+            partialFilterExpression={"phone_name_normalized": {"$exists": True}}
+        )
+        videos_collection.create_index(
+            [("video_id", 1)],
+            unique=True,
+            partialFilterExpression={"video_id": {"$exists": True}}
+        )
+    except Exception as e:
+        print("Recommender data index setup skipped/failed:", e)
 
 
 translator = GoogleTranslator()
@@ -237,6 +255,10 @@ def infer_price_range_from_title(title: str):
 
 
 
+def normalize_phone_name(name: str):
+    return "".join(re.findall(r"[a-z0-9]+", (name or "").lower()))
+
+
 def _consolidate_duplicate_phones(phones):
     """
     Consolidate phones with similar names and merge their descriptions.
@@ -255,25 +277,16 @@ def _consolidate_duplicate_phones(phones):
         if not phone_name:
             continue
             
-        # Simple similarity check - could be enhanced with fuzzy matching
-        found_match = False
-        for existing_name in consolidated.keys():
-            # Check if phone names are similar (basic approach)
-            if _are_phone_names_similar(phone_name, existing_name):
-                # Merge descriptions
-                existing_desc = consolidated[existing_name]['description']
-                if description not in existing_desc:  # Avoid duplicate content
-                    consolidated[existing_name]['description'] = f"{existing_desc} {description}".strip()
-                
-                # Update price_range if current one is null but new one has value
-                if consolidated[existing_name]['price_range'] is None and price_range is not None:
-                    consolidated[existing_name]['price_range'] = price_range
-                
-                found_match = True
-                break
-        
-        if not found_match:
-            consolidated[phone_name] = {
+        normalized_name = normalize_phone_name(phone_name)
+        if normalized_name in consolidated:
+            existing_desc = consolidated[normalized_name]['description']
+            if description and description not in existing_desc:
+                consolidated[normalized_name]['description'] = f"{existing_desc} {description}".strip()
+
+            if consolidated[normalized_name]['price_range'] is None and price_range is not None:
+                consolidated[normalized_name]['price_range'] = price_range
+        else:
+            consolidated[normalized_name] = {
                 'phone_name': phone_name,
                 'description': description,
                 'price_range': price_range
@@ -281,26 +294,16 @@ def _consolidate_duplicate_phones(phones):
     
     return list(consolidated.values())
 
-def _are_phone_names_similar(name1, name2):
-    """
-    Simple similarity check for phone names.
-    Could be enhanced with more sophisticated matching.
-    """
-    name1_clean = name1.lower().replace(' ', '')
-    name2_clean = name2.lower().replace(' ', '')
-    
-    # Check if one name contains the other (for cases like "iPhone 15" vs "iPhone 15 Pro")
-    return name1_clean in name2_clean or name2_clean in name1_clean
-
 def _call_llm_and_parse(prompt):
     """
     Call the LLM with the given prompt and parse the JSON response.
     """
     try:
         # Initialize the LLM
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            google_api_key=os.getenv("GOOGLE_API_KEY"),
+        llm = ChatOpenAI(
+            model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+            api_key=os.getenv("DEEPSEEK_API_KEY"),
+            base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
             temperature=0.1
         )
         
@@ -357,7 +360,7 @@ def _call_llm_and_parse(prompt):
         print(f"Error calling LLM: {e}")
         return []
 
-def process_video(video_id, title, url, price_range=None, uploaded_at=None):
+def process_video(video_id, title, url, price_range=None, uploaded_at=None, channel=None, channel_weight=1.0):
     """
     Process a YouTube video: extract transcript, segment into phones, store in MongoDB.
     Automatically infers price range if not provided.
@@ -388,6 +391,8 @@ def process_video(video_id, title, url, price_range=None, uploaded_at=None):
         "price_range": price_range,
         "uploaded_at": uploaded_at or datetime.utcnow(),
         "original_language": lang,
+        "source_channel": channel,
+        "source_weight": channel_weight,
         "processed_at": datetime.utcnow()
     }
 
@@ -404,18 +409,25 @@ def process_video(video_id, title, url, price_range=None, uploaded_at=None):
     # Store phones
     if phone_data and isinstance(phone_data, list):
         for entry in phone_data:
+            phone_name = entry.get("phone_name", "Unknown")
+            phone_name_normalized = normalize_phone_name(phone_name)
             phone_doc = {
                 "video_id": video_id,
-                "phone_name": entry.get("phone_name", "Unknown"),
+                "phone_name": phone_name,
+                "phone_name_normalized": phone_name_normalized,
                 "description": entry.get("description", ""),
                 "price_range": entry.get("price_range"),
                 "video_price_range": price_range,  # 🔹 consistent
+                "source_channel": channel,
+                "source_weight": channel_weight,
+                "source_url": url,
+                "source_title": title,
                 "created_at": datetime.utcnow()
             }
 
             try:
                 phones_collection.update_one(
-                    {"video_id": video_id, "phone_name": phone_doc["phone_name"]},
+                    {"video_id": video_id, "phone_name_normalized": phone_name_normalized},
                     {"$set": phone_doc},
                     upsert=True
                 )

@@ -2,469 +2,746 @@
 
 ## Scope
 
-This document is based on the current repository contents in `web/` and `ai-backend/`.
-It explains:
+This document explains the current IntelliFone repository as it exists now, with special attention to the updated AI backend pipelines.
 
-- which packages are used by which module
-- how each module is implemented
-- how modules interact with each other
-- notable implementation gaps or inconsistencies visible in code
+It covers:
 
-The analysis is grounded in source files, not only the README. A PDF named `IntelliFone System Modules.pdf` was available locally, but text extraction was blocked in the sandbox, so this write-up is based on the repository itself.
+- What each major module does
+- Which data each module reads and writes
+- How modules call each other
+- Why important design choices exist
+- Which environment variables and external services are required
+- Current limitations and operational notes
+
+The real backend code lives under `ai-backend/`. There are older root-level duplicate backend files in folders such as `DataCronJob/`, `PricePrediction/`, and `RecommendationEngine/`; those are not the active tracked backend and should not be used for development.
 
 ## High-Level Architecture
 
-IntelliFone is split into two main runtimes:
+IntelliFone has two main runtimes:
 
 1. `web/`
-   - Next.js frontend and API routes
-   - handles UI, auth, Supabase CRUD, and proxy calls to the AI backend
+   - Next.js frontend
+   - Supabase-backed auth, marketplace listings, storage, and buyer/seller chat
+   - API routes that proxy some AI requests to the FastAPI backend
+
 2. `ai-backend/`
-   - FastAPI service plus supporting ML/data collection scripts
-   - handles damage detection, condition scoring, price prediction, recommendations, chatbot, and cron-style data ingestion
+   - FastAPI service
+   - ML, LLM, scraping, and data-ingestion code
+   - MongoDB-backed AI datasets and chat history
 
-Persistent storage is split across:
+Storage is split by responsibility:
 
-- Supabase
-  - auth
-  - relational app data such as `mobile_phones`, `profiles`, chat-related tables, storage buckets
-- MongoDB
-  - AI/data-engineering collections such as `used_mobiles`, `phones`, `videos`, `conversations`, `messages`
-
-## Package Usage by Area
-
-### Frontend and Web API: `web/package.json`
-
-Core packages:
-
-| Package | Used For |
+| Storage | Used For |
 | --- | --- |
-| `next`, `react`, `react-dom`, `typescript` | App runtime and page/component implementation |
-| `@supabase/supabase-js` | Auth, database access, storage uploads, profile lookups |
-| `@tanstack/react-query` | Marketplace data fetching and caching |
-| `tailwindcss`, `@tailwindcss/postcss`, `tw-animate-css` | Styling |
-| `@radix-ui/react-select`, `@radix-ui/react-slider` | Marketplace filters and recommendation inputs |
-| `lucide-react`, `react-icons` | Icons |
-| `emailjs-com` | Contact/report email sending in frontend pages |
-| `pusher`, `pusher-js` | Real-time chat and inbox refresh |
-| `clsx`, `class-variance-authority`, `tailwind-merge` | Utility styling composition |
+| Supabase | user auth, marketplace listings, profiles, storage buckets, buyer/seller chat |
+| MongoDB | OLX used-phone market data, YouTube recommendation data, AI assistant conversations |
 
-### AI Backend: `ai-backend/requirements.txt`
+The AI backend currently uses DeepSeek through OpenAI-compatible clients:
 
-Core API and validation:
+- LangChain `ChatOpenAI` with `base_url=https://api.deepseek.com`
+- OpenAI SDK `OpenAI(..., base_url=https://api.deepseek.com)` in the YouTube watcher
 
-| Package | Used For |
+This does not mean requests go to OpenAI. The `base_url` sends them to DeepSeek.
+
+## Required Backend Environment Variables
+
+The backend reads these variables from `ai-backend/.env`:
+
+| Variable | Required For |
 | --- | --- |
-| `fastapi`, `uvicorn[standard]`, `python-multipart` | FastAPI server, form uploads, API endpoints |
-| `pydantic`, `python-dotenv` | request/data models and environment loading |
+| `MONGO_CONNECTION_STRING` | MongoDB access for scraping, recommendations, price prediction, and chat |
+| `DEEPSEEK_API_KEY` | All LLM calls after migration to DeepSeek |
+| `DEEPSEEK_MODEL` | Optional; defaults to `deepseek-chat` |
+| `DEEPSEEK_BASE_URL` | Optional; defaults to `https://api.deepseek.com` |
+| `SCRAPINGBEE_API_KEY` | Optional; OLX scraper uses it first, then falls back to direct requests |
+| `YOUTUBE_API_KEY` | YouTube watcher |
+| `SUPABASE_URL` | Damage report upload |
+| `SUPABASE_SERVICE_ROLE_KEY` | Damage report upload |
+| `SUPABASE_REPORTS_BUCKET` | Optional; defaults to `phone-reports` |
+| `SUPABASE_REPORTS_FOLDER` | Optional; defaults to `damage_reports` |
+| `ALLOWED_ORIGINS` | Optional comma-separated frontend origins for FastAPI CORS |
+| `MAX_IMAGE_BYTES` | Optional max image upload/download size; defaults to 10 MB |
 
-ML and data processing:
-
-| Package | Used For |
-| --- | --- |
-| `ultralytics` | YOLO-based damage detection |
-| `scikit-learn`, `pandas`, `numpy` | price prediction training and inference |
-| `shapely` | polygon area/bounds measurement from segmentation masks |
-| `reportlab` | PDF damage report generation |
-
-Data collection and databases:
-
-| Package | Used For |
-| --- | --- |
-| `pymongo`, `motor`, `dnspython` | MongoDB access |
-| `beautifulsoup4`, `requests` | OLX scraping |
-| `google-api-python-client` | YouTube Data API integration |
-| `youtube-transcript-api` | transcript extraction |
-| `deep-translator` | transcript translation to English |
-
-LLM and orchestration:
-
-| Package | Used For |
-| --- | --- |
-| `openai` | list-video relevance check in YouTube watcher |
-| `google-genai`, `langchain-google-genai` | Gemini-backed recommendations, transcript processing, chatbot |
-| `langchain`, `langchain-core` | prompt/output pipeline for OLX extraction |
-
-## Main Backend Entry Point
+## AI Backend Entry Point
 
 File: `ai-backend/main.py`
 
-This file wires the AI modules into a FastAPI app titled `IntelliFone AI Backend`.
+The FastAPI app exposes these routes:
 
-Endpoints implemented:
-
-| Endpoint | Purpose | Main Module Calls |
+| Endpoint | Purpose | Main Modules |
 | --- | --- | --- |
-| `GET /` | health-style welcome route | none |
-| `POST /damage-detection/` | download image URLs, run YOLO, generate PDF, compute score | `analyze_phone_images`, `generate_damage_report`, `compute_condition_score` |
-| `POST /condition-scoring/` | calculate score from damage JSON | `compute_condition_score` |
-| `POST /price-prediction/` | predict price band from phone attributes and AI flags | `run_pipeline` |
-| `POST /full-verification/` | one-shot detection + scoring + prediction | damage, scoring, prediction pipeline |
-| `GET /recommend/` | recommendation text for budget and priority | `get_recommendations` |
-| `POST /chat` | chatbot reply plus conversation persistence | `generate_reply`, chat CRUD helpers |
-| `GET /chat/{conversation_id}` | formatted chat history | chat CRUD helpers |
+| `GET /` | Basic welcome route | none |
+| `GET /health` | Lightweight deployment health check | none |
+| `POST /damage-detection/` | Download image URLs, run YOLO, create report, score condition | `DamageDetection`, `report_generator`, `ConditionScoring` |
+| `POST /condition-scoring/` | Score damage JSON directly | `ConditionScoring` |
+| `POST /price-prediction/` | Predict used phone price range | `PricePrediction` |
+| `POST /full-verification/` | Run damage detection, scoring, and price prediction in one flow | damage, scoring, price modules |
+| `GET /recommend/` | Recommend phones by budget and priority | `RecommendationEngine` |
+| `POST /chat` | AI assistant chat | `ChatBot` |
+| `GET /chat/{conversation_id}` | Get saved AI assistant conversation | `ChatBot.crud` |
 
-Operational flow:
+Startup checks require:
 
-1. frontend sends image URLs or form data to Next.js API routes
-2. Next.js routes proxy requests to FastAPI
-3. FastAPI calls the relevant AI/data module
-4. output is returned to Next.js and, where needed, persisted in Supabase
+- `MONGO_CONNECTION_STRING`
+- `DEEPSEEK_API_KEY`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `ai-backend/best3.pt`
 
-## Shared Data Models
+The YOLO import is lazy-loaded inside the damage detection function so the FastAPI app can import cleanly without immediately initializing Ultralytics.
+
+The API also configures CORS from `ALLOWED_ORIGINS`. If that variable is missing, local frontend origins are allowed by default:
+
+- `http://localhost:3000`
+- `http://127.0.0.1:3000`
+
+Image inputs are hardened with:
+
+- HTTP/HTTPS URL validation for image URL workflows
+- image content-type checks
+- max image size enforcement through `MAX_IMAGE_BYTES`
+- per-request temporary folders for uploaded images, annotated outputs, and generated reports
+
+Why this matters:
+
+- concurrent damage-detection requests no longer share `uploads/`, `outputs/`, or `reports`
+- one user request cannot delete another request's temporary files
+- deployment health checks can call `/health` without loading YOLO or touching external services
+
+## Shared Python Models
 
 File: `ai-backend/models.py`
 
-Important models:
+### `UsedMobile`
 
-- `UsedMobile`
-  - shared schema for scraped phones and inference input
-  - includes brand, model, RAM, storage, subjective condition, AI condition score, PTA flag, hardware flags, price, city, images, source metadata
-- `NewMobile`
-  - schema for richer phone specification data, currently not central in the observed flow
-- `ChatRequest`, `ChatResponse`, `ChatMessage`, `ChatHistoryResponse`
-  - request/response types for chatbot endpoints
+This is the core schema shared by:
 
-This file is the main contract between scraping, prediction, and API layers on the Python side.
+- OLX scraper
+- price prediction endpoint
+- full verification endpoint
 
-## Module-by-Module Analysis
+Important fields:
 
-### 1. Damage Detection Module
+- `brand`, `model`, `ram`, `storage`
+- `condition`, `condition_score`
+- PTA and damage flags
+- `price`, `city`
+- `listing_source`, `images`, `post_date`
 
-Primary file:
+### Chat Models
 
-- `ai-backend/DamageDetection/Damage_Detection.py`
+- `ChatRequest`
+- `ChatResponse`
+- `ChatMessage`
+- `ChatHistoryResponse`
 
-Packages used:
+These structure the MongoDB-backed AI assistant chat endpoints.
 
-- `ultralytics`
-- `cv2`
-- `matplotlib`
-- `shapely`
-- `os`
+## Damage Detection Pipeline
 
-Implementation:
+Primary file: `ai-backend/DamageDetection/Damage_Detection.py`
 
-- loads a YOLO model from a `.pt` file
-- expects a mapping of phone sides to local image paths:
+Purpose:
+
+Detect physical damage from phone images using a YOLO segmentation model.
+
+Inputs:
+
+- YOLO model path, usually `ai-backend/best3.pt`
+- dictionary of side names to local image paths:
   - `front`
   - `back`
   - `left`
   - `right`
   - `top`
   - `bottom`
-- runs `model.predict()` per valid image
-- reads segmentation masks from YOLO output
-- converts each mask into a `Polygon`
-- measures damage size:
-  - `dot` as polygon area
-  - `crack` and `line` as max side of polygon bounds
-- returns JSON in this shape:
-  - `{"damages": {"front": {"crack": [...], "dot": [...]}, ...}}`
 
-Working logic:
+Flow:
 
-1. FastAPI saves or downloads images locally.
-2. `analyze_phone_images()` loads the model.
-3. Each valid image is inferred independently.
-4. Annotated output images can optionally be saved in `outputs/`.
-5. A normalized `damages` structure is returned to later modules.
+1. `analyze_phone_images()` receives image paths and an optional `output_dir`.
+2. It lazy-imports `YOLO` from `ultralytics`.
+3. It runs prediction for each valid image.
+4. For each mask, `process_yolo_result()` converts the segmentation polygon into damage metrics.
+5. Dots are measured by polygon area.
+6. Cracks and lines are measured by the max span of polygon bounds.
+7. It returns:
 
-Notes:
+```json
+{
+  "damages": {
+    "front": {
+      "crack": [{"length_px": 123.4}],
+      "dot": [{"area_px": 55.2}]
+    }
+  }
+}
+```
 
-- class names are fixed as `["crack", "dot", "line"]`
-- the `DAMAGE_MEASUREMENT` map uses `screen_line` but the actual class list uses `line`; because the code falls back to length measurement, it still works, but the mapping is inconsistent
-- `cv2` and `matplotlib` are imported in code but not listed in `requirements.txt`
+Why this design:
 
-### 2. Damage Report Generator
+- Each side is processed independently, making it simple to map damage severity to visible phone areas.
+- The output is compact and usable by condition scoring.
 
-Primary file:
+Operational note:
 
-- `ai-backend/report_generator.py`
+- The module sets local runtime config paths for Matplotlib and Ultralytics under `ai-backend/.runtime/` to avoid Windows permission issues.
+- The FastAPI app passes a per-request output directory, so annotated images are isolated per request.
 
-Packages used:
+## Condition Scoring Pipeline
 
-- `reportlab`
-- `os`
+Primary file: `ai-backend/ConditionScoring/condition_scoring.py`
 
-Implementation:
+Purpose:
 
-- creates an A4 PDF
-- prints each phone side as a section
-- embeds the saved annotated image if it exists
-- lists detected damage metrics under that side
+Convert raw detected damage into a numeric condition score and boolean AI damage flags.
 
-Working logic:
+Flow:
 
-1. `/damage-detection/` saves annotated images to `outputs/`.
-2. `generate_damage_report()` builds a PDF in `reports/`.
-3. the Next.js add-phone route reads the generated PDF from disk and uploads it to Supabase Storage.
+1. Accepts damage JSON.
+2. Applies side weights:
+   - front is most important
+   - back is medium
+   - edges are lower impact
+3. Applies damage severity weights:
+   - crack
+   - line
+   - dot
+4. Uses logarithmic scaling so many small detections do not explode the penalty linearly.
+5. Returns:
 
-### 3. Condition Scoring Module
+```json
+{
+  "condition_score": 17.2,
+  "penalty_total": 12.5,
+  "ai_detected": {
+    "screen_crack": true,
+    "panel_dot": false,
+    "panel_line": false
+  }
+}
+```
 
-Primary file:
+Why this design:
 
-- `ai-backend/ConditionScoring/condition_scoring.py`
+- The price module needs both a numeric condition score and simple boolean damage flags.
+- Log scaling makes large damage matter without letting a single noisy mask dominate too much.
 
-Packages used:
+## Report Generation
 
-- `numpy`
-- `json`
+Primary file: `ai-backend/report_generator.py`
 
-Implementation:
+Purpose:
 
-- takes either a damage JSON object or a file path to JSON
-- applies side weights:
-  - front `1.0`
-  - back `0.6`
-  - left/right/top/bottom `0.3`
-- applies severity weights:
-  - crack `8`
-  - line `7`
-  - dot `6`
-- sums magnitudes per class and side
-- computes penalty using `severity * side_weight * log1p(total_magnitude)`
-- converts penalty into a `0-20` condition score with `20 - penalty / SCALE`
-- also sets AI boolean flags:
-  - `screen_crack`
-  - `panel_dot`
-  - `panel_line`
+Create a PDF report for detected damages and upload it to Supabase.
 
-Working logic:
+Flow:
 
-1. consumes the `damages` object from the damage detection module
-2. compresses multiple detections into a single penalty score
-3. returns both numeric score and feature flags for price prediction
+1. `generate_damage_report()` writes an A4 PDF.
+2. It lists detected damages by phone side.
+3. If annotated images exist, they are embedded.
+4. `upload_report_to_supabase()` uploads the PDF to Supabase Storage.
 
-Output shape:
+Environment variables:
 
-- `condition_score`
-- `penalty_total`
-- `ai_detected`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_REPORTS_BUCKET`
+- `SUPABASE_REPORTS_FOLDER`
 
-### 4. Price Prediction Module
-
-Primary file:
-
-- `ai-backend/PricePrediction/predict_price_service.py`
-
-Packages used:
-
-- `pymongo`
-- `scikit-learn`
-- `pandas`
-- `dotenv`
-- `re`
-
-Implementation:
-
-- connects to MongoDB collection `MobileDB.used_mobiles`
-- fetches training records using regex match on the requested model
-- converts raw OLX records into `UsedMobile`
-- derives condition score from subjective condition if missing
-- preprocesses training and input rows:
-  - extracts numeric values from `ram` and `storage`
-  - converts booleans to `0/1`
-  - removes non-feature fields
-- trains a `RandomForestRegressor` on the fly for the requested model
-- predicts a base price
-- adjusts it using:
-  - AI condition score
-  - discrepancy between user-declared damage flags and AI-detected flags
-  - PTA status
-  - panel and hardware penalties
-- calculates uncertainty from interquartile range of market prices
-- returns `{min_price, max_price}`
-
-Working logic:
-
-1. `run_pipeline()` fetches same-model training data from MongoDB.
-2. if fewer than 20 valid records exist, it raises an error.
-3. a random forest is trained per request.
-4. the raw prediction is post-adjusted by rules.
-5. final price band is rounded to nearest `500`.
-
-Important implementation detail:
-
-- the model is not pre-trained and saved; training happens during inference for each request based on current MongoDB data
-
-Strengths:
-
-- uses fresh scraped market data
-- adapts uncertainty to price dispersion for that model
-
-Limitations visible in code:
-
-- no caching of trained models
-- same-model regex fetch may mix variants with similar names
-- runtime depends on MongoDB data quality and availability
-
-### 5. OLX Scraping and Market Data Module
+## OLX Used-Mobile Scraping Pipeline
 
 Primary files:
 
 - `ai-backend/DataCronJob/olx_scraper_service.py`
 - `ai-backend/DataCronJob/cron_scraper.py`
 
-Packages used:
+Purpose:
 
-- `beautifulsoup4`
-- `requests`
-- `pymongo`
-- `python-dotenv`
-- `langchain-core`
-- `langchain-google-genai`
-- `langchain_openai` import in source
+Collect used-phone market listings from OLX Pakistan and store structured data in MongoDB for price prediction.
 
-Implementation in `olx_scraper_service.py`:
+MongoDB collection:
 
-- scrapes OLX listing pages and detail pages
-- extracts title, price, location, description, details, image URLs, link
-- builds a strict prompt asking an LLM to:
-  - verify listing matches expected brand/model
-  - reject multi-model or mismatched listings with `"skip"`
-  - return structured JSON for valid listings
-- sanitizes LLM JSON
-- validates it against `UsedMobile`
-- stores results in MongoDB with:
-  - unique index on `link`
-  - TTL index on `extraction_date` for 60 days
+- database: `MobileDB`
+- collection: `used_mobiles`
 
-Working logic:
+Indexes are created by `ensure_olx_indexes()`, not automatically at import time:
 
-1. `scrape_used_data(model, brand)` iterates OLX search pages.
-2. each listing is fetched and parsed with BeautifulSoup.
-3. listing text is sent through an LLM extraction chain.
-4. validated records are inserted into `used_mobiles`.
-5. process stops when no more listings are found or 150 records are saved.
+```python
+collection.create_index([("link", 1)], unique=True)
+collection.create_index([("extraction_date", 1)])
+```
 
-Implementation in `cron_scraper.py`:
+Old TTL cleanup:
 
-- reads brand/model lists from MongoDB collection `mobile_brands`
-- processes brands in round-robin batches
-- uses `model_index` to remember where the next batch should start
-- default batch size is 10 models per run
+The scraper and price module both drop any old TTL index on `extraction_date` when their index setup functions run. This matters because older listings are now intentionally preserved for fallback training data.
 
-Why it matters:
+Why index setup is explicit:
 
-- this module is the training data source for the price prediction service
+- importing scraper or prediction modules should not fail just because MongoDB is briefly unavailable
+- cron jobs and API startup can decide when to prepare indexes
+- index setup failures are logged without crashing unrelated imports
 
-Important code observation:
+### Fetching Strategy
 
-- `olx_scraper_service.py` imports `ChatOpenAI` from `langchain_openai`, but `langchain-openai` is not listed in `requirements.txt`
+`fetch(url)` works like this:
 
-### 6. Recommendation Data Ingestion Module
+1. If `SCRAPINGBEE_API_KEY` is set:
+   - request goes through ScrapingBee
+   - `country_code` is `pk`
+   - `render_js` is `false`
+   - `block_resources` is `true`
+2. If ScrapingBee fails:
+   - it falls back to a direct `requests.get()`
+3. If no ScrapingBee key exists:
+   - it uses direct request immediately
 
-Primary file:
+Why:
 
-- `ai-backend/DataCronJob/recommender_data_service.py`
+- OLX Pakistan may behave better with Pakistan-based proxy traffic.
+- Direct fallback keeps the scraper usable if ScrapingBee is unavailable.
 
-Packages used:
+### Search and Detail Flow
 
-- `youtube-transcript-api`
-- `deep-translator`
-- `pymongo`
-- `langchain-google-genai`
-- `json`, `re`
+`scrape_used_data(model, brand)`:
 
-Implementation:
+1. Starts at page 1.
+2. Calls `get_ads_from_page(page_num, model, brand)`.
+3. Stops when OLX returns zero ads on a page.
+4. Stops after 150 successfully saved listings.
+5. Sleeps randomly between pages.
 
-- fetches a YouTube transcript by video ID
-- tries English first
-- falls back to other languages and translates to English
-- chunks long transcripts
-- sends transcript or chunks to Gemini via LangChain
-- expects JSON array of:
-  - `phone_name`
-  - `description`
-  - `price_range`
-- consolidates duplicate or similar phone names
-- stores:
-  - video metadata in `videos`
-  - extracted phones in `phones`
-- creates a TTL index on `phones.created_at`
+`get_ads_from_page()`:
 
-Working logic:
+1. Builds query such as `Google Pixel 6A`.
+2. Fetches the OLX search page.
+3. Selects listings using `li[aria-label='Listing']`.
+4. Counts `ads_found`.
+5. For each listing:
+   - extracts title, price, location, link
+   - runs a cheap title pre-filter
+   - fetches detail page only if title looks relevant
+   - extracts description, details, images
+   - calls LLM extraction
 
-1. transcript is fetched from YouTube.
-2. if needed, non-English transcript is translated.
-3. LLM extracts phones and rounded price bands.
-4. duplicate phone mentions are merged.
-5. final phone recommendation records are upserted into MongoDB.
+The pagination fix is important:
 
-Role in system:
+- old behavior stopped when zero records were saved
+- new behavior stops only when zero ads are found
+- this prevents stopping early when a page contains only duplicates or LLM-skipped listings
 
-- this is the knowledge-ingestion pipeline for the recommendation engine
+### Title Pre-Filter
 
-### 7. YouTube Watcher Module
+`title_matches_model(title, model_query, brand)` prevents obvious mismatches before detail fetch.
 
-Primary file:
+Example:
+
+- scraping `Google Pixel 6A`
+- listing title `Redmi Note 13 Pro`
+- skip without detail page fetch or LLM call
+
+Why:
+
+- Saves ScrapingBee credits
+- Saves DeepSeek tokens
+- Speeds up scraping
+
+The LLM still performs final strict validation later.
+
+### LLM Extraction
+
+The scraper uses:
+
+```python
+ChatOpenAI(
+    model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+)
+```
+
+The prompt asks DeepSeek to:
+
+- verify exact brand/model
+- allow only `4G`/`5G` suffix differences
+- reject multi-model listings
+- return either `skip` or raw JSON
+
+The prompt intentionally rejects listings like:
+
+```text
+Pixel 6A / Pixel 7 / Pixel 8 Pro all available
+```
+
+Why:
+
+- Multi-model shop listings are bad training data for price prediction.
+
+### Save to MongoDB
+
+`save_to_db()`:
+
+1. Converts the `UsedMobile` object to dict.
+2. Adds:
+   - `_id`
+   - `link`
+   - `extraction_date`
+3. Inserts into `used_mobiles`.
+4. Duplicate links are skipped via unique index.
+
+Stored data is later used by the price prediction module.
+
+### Cron Scraper
+
+`cron_scraper.py` reads collection:
+
+- database: `MobileDB`
+- collection: `mobile_brands`
+
+Expected brand document shape:
+
+```json
+{
+  "brand": "Google",
+  "models": ["Pixel 6A", "Pixel 7", "..."],
+  "model_index": 0
+}
+```
+
+Flow:
+
+1. Call `ensure_olx_indexes()`.
+2. Fetch all brand docs.
+3. For each brand, select next batch of models.
+4. Call `scrape_used_data(model, brand)` for each model.
+5. Move `model_index` forward.
+
+Why:
+
+- Round-robin scraping prevents one brand/model set from dominating collection time.
+- The OLX scraper no longer executes a test scrape when imported; the old `scrape_used_data("Pixel 6A", "Google")` line is commented.
+- Cron jobs should be deployed as separate scheduled commands, not inside the FastAPI web process.
+
+## Price Prediction Pipeline
+
+Primary file: `ai-backend/PricePrediction/predict_price_service.py`
+
+Purpose:
+
+Predict a used phone price range from current and historical OLX market data.
+
+MongoDB collection:
+
+- database: `MobileDB`
+- collection: `used_mobiles`
+
+Indexes are prepared by `ensure_price_prediction_indexes()` during FastAPI startup, with safe error handling.
+
+Constants:
+
+```python
+RECENT_LISTINGS_DAYS = 60
+MIN_RECENT_LISTINGS = 50
+MIN_TRAINING_LISTINGS = 20
+```
+
+### Training Data Selection
+
+`fetch_training_data(input_model, input_brand, db)` works in stages:
+
+1. Query broad candidate records by model regex.
+2. Apply exact normalized model matching in Python.
+3. Split records into:
+   - recent listings from the last 60 days
+   - all listings
+4. If recent valid records are at least 50:
+   - use only recent data
+5. Otherwise:
+   - use all matching records, including older listings
+6. If total valid records are below 20:
+   - raise an error
+
+Why:
+
+- Recent data reflects current market price.
+- Older data gives fallback when recent data is too sparse.
+- Preserving older listings improves coverage for less common models.
+
+### Exact Model Matching
+
+The model matching avoids bad mixes like:
+
+- `Pixel 6` vs `Pixel 6A`
+- `Pixel 6` vs `Pixel 6 Pro`
+- `A52` vs `A52s`
+- `Note 13` vs `Note 13 Pro`
+
+It normalizes model names by:
+
+1. Lowercasing.
+2. Removing brand tokens.
+3. Keeping only letters and digits.
+
+Examples:
+
+```text
+Google Pixel 6A -> pixel6a
+Pixel 6A        -> pixel6a
+Pixel 6         -> pixel6
+Pixel 6 Pro     -> pixel6pro
+```
+
+Only exact normalized matches are used.
+
+### Feature Engineering
+
+`preprocess_training_data()`:
+
+- extracts numeric RAM and storage
+- converts booleans to `0` and `1`
+- drops non-feature fields:
+  - images
+  - post date
+  - source
+  - city
+  - model
+  - brand
+
+`preprocess_input_mobile()` performs the same feature normalization for the user input.
+
+### Model Training and Prediction
+
+For each request:
+
+1. Fetch matching market records.
+2. Build training dataframe.
+3. Train `RandomForestRegressor`.
+4. Predict base price.
+5. Apply rule-based adjustments:
+   - condition score
+   - damage flags
+   - PTA status
+   - panel changed
+   - camera/fingerprint status
+6. Compute uncertainty from IQR of training prices.
+7. Return:
+
+```json
+{
+  "min_price": 75000,
+  "max_price": 85000
+}
+```
+
+Why train per request:
+
+- It keeps prediction tied to the freshest MongoDB market data.
+
+Tradeoff:
+
+- It is slower than using cached/pretrained models.
+- Later improvement could cache models per brand/model for a short time.
+
+## YouTube Recommendation Data Pipeline
+
+Primary files:
 
 - `ai-backend/DataCronJob/youtube_watcher_service.py`
-
-Packages used:
-
-- `google-api-python-client`
-- `openai`
-- `pymongo`
-- `dotenv`
-
-Implementation:
-
-- monitors a fixed set of YouTube channels
-- fetches videos published in the recent window
-- uses OpenAI to classify whether a video is a list/recommendation style video
-- skips single-phone reviews or irrelevant content
-- stores new relevant videos in MongoDB
-- triggers `process_video()` for transcript extraction and phone extraction
-
-Working logic:
-
-1. call YouTube Data API for each channel
-2. use `gpt-4o` to check semantic relevance
-3. skip duplicates already in MongoDB
-4. process relevant new videos into structured phone records
-
-Role in system:
-
-- this module keeps the recommendation database fresh
-
-### 8. Recommendation Engine Runtime Module
-
-Primary file:
-
+- `ai-backend/DataCronJob/recommender_data_service.py`
 - `ai-backend/RecommendationEngine/recommendation_service.py`
 
-Packages used:
+Purpose:
 
-- `pymongo`
-- `langchain-google-genai`
-- `pydantic`
+Build a recommendation knowledge base from Pakistani phone-review YouTube channels, then use it to answer user recommendation requests.
 
-Implementation:
+MongoDB collections:
 
-- loads recommendation candidates from MongoDB collection `phones`
-- tries to filter by approximate budget
-- builds a prompt listing candidate phones and user priority
-- asks Gemini to rank and explain matches
-- returns formatted recommendation text
+- `MobileDB.videos`
+- `MobileDB.phones`
 
-Working logic:
+Recommendation indexes are prepared explicitly:
 
-1. `/recommend/` receives `max_price` and `priority`
-2. MongoDB is queried for candidate phones
-3. prompt is sent to Gemini
-4. formatted text is returned to frontend
+- the FastAPI app calls `ensure_recommendation_indexes()` for runtime recommendation queries
+- the YouTube watcher calls `ensure_recommender_data_indexes()` before ingesting videos
+- index setup is wrapped in safe error handling so imports remain lightweight
 
-Important code issue:
+### YouTube Watcher
 
-- the MongoDB query defines `price_range` twice in the same object:
-  - once with `$lte`
-  - once with `$gte`
-- in Python dictionaries, the second key overwrites the first, so only one bound is actually applied
-- result: recommendation filtering is looser than intended
+File: `youtube_watcher_service.py`
 
-### 9. Chatbot Module
+Required env vars:
+
+- `YOUTUBE_API_KEY`
+- `MONGO_CONNECTION_STRING`
+- `DEEPSEEK_API_KEY`
+
+Configured channels:
+
+```python
+CHANNELS = {
+    "Babloo Lahori": "...",
+    "ReviewsPK": "...",
+    "VideoWaliSarkar": "...",
+    "MAS TECH": "..."
+}
+```
+
+Each channel also has a configurable trust weight:
+
+```python
+CHANNEL_WEIGHTS = {
+    "Babloo Lahori": 1.0,
+    "ReviewsPK": 1.0,
+    "VideoWaliSarkar": 1.0,
+    "MAS TECH": 1.0
+}
+```
+
+How to set weights:
+
+- `1.2` means highly trusted
+- `1.0` means normal
+- `0.8` means less trusted
+- `0.6` means noisy or low confidence
+
+The watcher:
+
+1. Fetches recent videos for each channel.
+2. Uses DeepSeek to classify whether the video is list/recommendation style.
+3. Skips single-phone reviews, news, and irrelevant videos.
+4. Inserts new relevant videos into `videos`.
+5. Calls `process_video(..., channel=name, channel_weight=...)`.
+
+### Transcript Processing
+
+File: `recommender_data_service.py`
+
+`fetch_transcript(video_id)`:
+
+1. Tries English transcript first.
+2. If missing, lists available transcripts.
+3. Fetches another language if available.
+4. Translates non-English chunks to English using `deep-translator`.
+
+`segment_transcript()`:
+
+- sends short transcripts in one LLM call
+- splits long transcripts into overlapping chunks
+- chunk overlap reduces risk of missing phones at chunk boundaries
+
+### Phone Extraction
+
+DeepSeek is asked to return a JSON array:
+
+```json
+[
+  {
+    "phone_name": "Samsung Galaxy A55",
+    "description": "Summary of pros and cons",
+    "price_range": 85000
+  }
+]
+```
+
+Validation:
+
+- response must parse as JSON
+- each item must have phone name and description
+- `price_range` must be:
+  - integer
+  - multiple of 5000
+  - between 5000 and 200000
+
+Invalid `price_range` values become `null`.
+
+### Duplicate Consolidation
+
+Phones are consolidated by exact normalized phone name:
+
+```text
+iPhone 15     -> iphone15
+iPhone 15 Pro -> iphone15pro
+```
+
+This avoids the old unsafe substring behavior where `iPhone 15` could merge with `iPhone 15 Pro`.
+
+### Stored Phone Documents
+
+The `phones` collection stores:
+
+```json
+{
+  "video_id": "...",
+  "phone_name": "Samsung Galaxy A55",
+  "phone_name_normalized": "samsunggalaxya55",
+  "description": "...",
+  "price_range": 85000,
+  "video_price_range": "80000_to_100000",
+  "source_channel": "ReviewsPK",
+  "source_weight": 1.0,
+  "source_url": "https://www.youtube.com/watch?v=...",
+  "source_title": "...",
+  "created_at": "..."
+}
+```
+
+Indexes:
+
+```python
+phones_collection.create_index("created_at", expireAfterSeconds=60 * 24 * 60 * 60)
+phones_collection.create_index([("price_range", 1)])
+phones_collection.create_index([("phone_name_normalized", 1)])
+phones_collection.create_index([("source_channel", 1)])
+phones_collection.create_index([("source_weight", -1)])
+phones_collection.create_index(
+    [("video_id", 1), ("phone_name_normalized", 1)],
+    unique=True,
+    partialFilterExpression={"phone_name_normalized": {"$exists": True}}
+)
+videos_collection.create_index(
+    [("video_id", 1)],
+    unique=True,
+    partialFilterExpression={"video_id": {"$exists": True}}
+)
+```
+
+The YouTube recommendation dataset still expires after 60 days. This is different from OLX pricing data, where older listings are intentionally preserved.
+
+Why YouTube data expires:
+
+- Recommendations from YouTube videos become stale quickly.
+- Keeping the recommendation set recent is usually desirable.
+
+### Recommendation Runtime
+
+File: `RecommendationEngine/recommendation_service.py`
+
+`get_recommendations(max_price, priority)`:
+
+1. Queries phones with `price_range <= max_price`.
+2. Sorts by highest price under budget first.
+3. Limits candidates to 25.
+4. If no under-budget phones exist:
+   - searches a fallback range from `max_price - 10000` to `max_price + 5000`.
+5. Builds candidate text including:
+   - phone name
+   - description
+   - price range
+   - source channel
+   - source weight
+6. Sends candidates to DeepSeek.
+7. DeepSeek ranks phones based on user priority.
+
+Why under-budget first:
+
+- A user budget is normally a maximum, not a target-only number.
+- Sorting descending keeps the best phones closest to the budget near the top.
+
+Why source weight is included:
+
+- It gives the LLM a trust signal when ranking similar candidates.
+- It does not hard-code the winner; it influences reasoning.
+
+## Chatbot Pipeline
 
 Primary files:
 
@@ -472,357 +749,144 @@ Primary files:
 - `ai-backend/ChatBot/crud.py`
 - `ai-backend/ChatBot/db.py`
 
-Packages used:
+Purpose:
+
+Provide a smartphone-focused AI assistant with saved conversation history.
 
-- `langchain-google-genai`
-- `pymongo`
-- `bson`
-- `dotenv`
-- `re`
+Flow:
 
-Implementation:
+1. FastAPI receives `/chat`.
+2. If no conversation exists, it creates one.
+3. Chat history is loaded from MongoDB.
+4. If the message looks like a recommendation request, it routes to `get_recommendations()`.
+5. Otherwise it sends chat history and the user message to DeepSeek.
+6. User and assistant messages are saved.
 
-- chatbot is restricted to smartphone-related topics via a system prompt
-- detects recommendation-style user messages with keyword matching
-- recommendation-like prompts are routed to `get_recommendations()`
-- all other prompts go to Gemini chat
-- conversations and messages are stored in MongoDB
+Recommendation detection is keyword-based:
 
-Working logic:
+- recommend
+- suggestion
+- best phone
+- which phone
+- buy
+- purchase
 
-1. frontend posts chat message to Next.js API.
-2. Next.js proxies to FastAPI `/chat`.
-3. FastAPI either creates a new conversation or loads history.
-4. chatbot generates reply.
-5. both user and assistant messages are saved.
-6. frontend can fetch conversation history from `/chat/{conversation_id}`.
+Tradeoff:
 
-Strength:
+- Simple and fast, but complex recommendation phrasing may be missed.
+
+## Frontend Overview
 
-- combines general phone Q&A with recommendation routing
+The frontend lives under `web/`.
 
-Limitation:
+Major areas:
 
-- recommendation intent detection is keyword-based and may miss more complex phrasing
-
-## Frontend Module Analysis
-
-### 1. Supabase Access Layer
-
-Primary files:
-
-- `web/app/lib/supabaseClient.ts`
-- `web/app/lib/supabaseAdmin.ts`
-
-Packages used:
-
-- `@supabase/supabase-js`
-
-Implementation:
-
-- `supabaseClient.ts` creates a browser-safe client using public URL and anon key
-- `supabaseAdmin.ts` creates a server-side client with service role key and disabled session persistence
-
-Role:
-
-- all auth, DB, and storage interactions in the web app depend on these wrappers
-
-### 2. Phone Listing Creation Flow
-
-Primary files:
-
-- `web/app/add/page.tsx`
-- `web/app/api/phones/add/route.ts`
-
-Packages used:
-
-- frontend: React, Supabase client, Next navigation
-- API route: Supabase client, Node `fs`
-
-Implementation in page:
-
-- ensures user is logged in
-- uploads up to 6 images directly to Supabase Storage bucket `phone-images`
-- collects form data for phone details
-- submits JSON payload to `/api/phones/add`
-
-Implementation in API route:
-
-- forwards image URLs to FastAPI `/damage-detection/`
-- receives:
-  - `pdf_path`
-  - `condition_score`
-- reads the generated PDF from disk
-- uploads PDF to Supabase Storage bucket `phone-reports`
-- inserts final listing into `mobile_phones`
-
-End-to-end working flow:
-
-1. seller uploads images to Supabase
-2. image public URLs are sent to FastAPI
-3. FastAPI downloads those URLs, runs AI verification, generates report
-4. Next.js uploads report to Supabase
-5. listing is inserted into Supabase with report URL and condition score
-
-### 3. Marketplace Module
-
-Primary files:
-
-- `web/app/marketplace/page.tsx`
-- `web/app/api/phones/list/route.ts`
-- `web/app/components/card/ProductCard.tsx`
-
-Packages used:
-
-- `@tanstack/react-query`
-- Radix Select and Slider
-- Supabase
-
-Implementation:
-
-- page fetches phone list via React Query from `/api/phones/list`
-- API route selects from Supabase table `mobile_phones`
-- client applies:
-  - search by model/company
-  - company filter
-  - storage filter
-  - price slider
-  - pagination
-
-Role:
-
-- this is the main buyer browsing experience
-
-### 4. Product Detail Module
-
-Primary file:
-
-- `web/app/phones/[id]/page.tsx`
-
-Packages used:
-
-- React
-- Next navigation and linking
-- Supabase client
-- Lucide icons
-
-Implementation:
-
-- fetches all phones and selects one by route ID
-- fetches seller info from `/api/users/[id]`
-- renders image carousel, condition/verification state, report link, seller info
-- allows:
-  - save action
-  - report action
-  - start chat with seller
-
-Important code observations:
-
-- page imports `getOrCreateConversation()` but does not use it
-- some chat table names are inconsistent:
-  - `conversation`
-  - `conversations`
-- this can affect reliability depending on actual Supabase schema
-
-### 5. Recommendation UI Module
-
-Primary files:
-
-- `web/app/recommendation/page.tsx`
-- `web/app/api/phones/recommend/route.ts`
-
-Packages used:
-
-- React
-- Radix slider
-- Lucide icons
-
-Implementation:
-
-- user chooses budget and priority
-- page calls `/api/phones/recommend`
-- API route proxies to FastAPI `/recommend/`
-- response text is shown in a formatted block
-
-Role:
-
-- this is the user-facing entry point to the recommendation engine
-
-### 6. Auth Module
-
-Representative files:
-
-- `web/app/(auth)/signin/page.tsx`
-- `web/app/(auth)/signup/page.tsx`
-- `web/app/components/auth/GoogleButton.tsx`
-- `web/app/(auth)/callback/page.tsx`
-
-Packages used:
-
-- Supabase
-- React
-
-Implementation:
-
-- supports session-based auth checks
-- supports Google OAuth via Supabase
-- redirects users after login or callback completion
-
-### 7. Real-Time Chat Module
-
-Primary files:
-
-- `web/app/chats/ChatClient.tsx`
-- `web/app/components/chat/Inbox.tsx`
-- `web/app/components/chat/ChatWindow.tsx`
-- `web/hooks/useRealtimeChat.ts`
-- `web/app/api/messages/send/route.ts`
-
-Packages used:
-
-- Supabase
-- `pusher`
-- `pusher-js`
-- React
-
-Implementation:
-
-- `ChatClient.tsx` verifies authenticated session and loads inbox/chat panes
-- `Inbox.tsx` reads conversations from Supabase and subscribes to Pusher inbox events
-- `ChatWindow.tsx` loads messages from Supabase and listens for room events via `useRealtimeChat`
-- sending a message:
-  - inserts into Supabase `messages`
-  - calls `/api/messages/send`
-  - server route triggers Pusher events for:
-    - active chat room
-    - recipient inbox
-    - sender inbox
-
-Role:
-
-- this is a separate real-time buyer/seller messaging system on the web side
-
-Important architectural note:
-
-- there are two chat systems in this repository:
-  - MongoDB-backed AI assistant chat in `ai-backend/ChatBot`
-  - Supabase + Pusher user-to-user chat in `web/app/components/chat`
-
-These are independent modules serving different use cases.
-
-### 8. Admin Module
-
-Primary files:
-
-- `web/app/api/admin/users/route.ts`
-- `web/app/api/admin/ads/route.ts`
-- `web/app/admin/page.tsx`
-
-Packages used:
-
-- Supabase admin client
-
-Implementation:
-
-- server routes query `profiles` and `mobile_phones`
-- intended to support admin dashboard management of users and ads
-
-## End-to-End Data Flows
-
-### A. Seller Listing and AI Verification
-
-1. user signs in via Supabase
-2. user uploads up to 6 photos to Supabase Storage
-3. frontend sends public image URLs to `/api/phones/add`
-4. Next.js route calls FastAPI `/damage-detection/`
-5. FastAPI downloads images, runs YOLO, creates PDF, computes score
-6. Next.js uploads PDF report to Supabase Storage
-7. listing is inserted into `mobile_phones`
-
-### B. Price Prediction
-
-1. user or frontend sends structured phone attributes to `/price-prediction/`
-2. FastAPI builds a `UsedMobile` object
-3. MongoDB training data is fetched from `used_mobiles`
-4. random forest is trained on demand
-5. price band is returned
-
-### C. Recommendations
-
-1. YouTube watcher finds relevant videos
-2. transcript processor extracts phone summaries and price ranges
-3. records are stored in MongoDB `phones`
-4. frontend recommendation page calls FastAPI `/recommend/`
-5. Gemini ranks candidate phones for the requested priority
-
-### D. AI Assistant Chat
-
-1. frontend sends prompt to `/api/chat`
-2. Next.js proxies to FastAPI `/chat`
-3. FastAPI reads or creates MongoDB conversation
-4. chatbot returns recommendation text or Gemini-generated answer
-
-### E. User-to-User Chat
-
-1. buyer opens seller chat from product page
-2. conversation and messages live in Supabase
-3. Pusher distributes real-time updates to inbox and active chat window
-
-## Notable Code-Level Findings
-
-These are implementation findings from the current codebase, not assumptions:
-
-1. `ai-backend/RecommendationEngine/recommendation_service.py`
-   - budget filter query is incorrect because `price_range` is declared twice in one dictionary
-   - only one bound survives
-
-2. `ai-backend/DamageDetection/Damage_Detection.py`
-   - `DAMAGE_MEASUREMENT` uses `screen_line` while classes use `line`
-   - behavior still works due to fallback path, but naming is inconsistent
-
-3. `ai-backend/main.py`
-   - code references `best2.pt`
-   - repository listing showed `best3.pt`
-   - model filename alignment should be verified
-
-4. `ai-backend/requirements.txt`
-   - source imports `cv2`, `matplotlib`, and `langchain_openai`
-   - these dependencies are not clearly present in requirements
-
-5. `web` chat-related code
-   - table names alternate between `conversation` and `conversations`
-   - consistency depends on actual Supabase schema and may cause defects
-
-6. `web/app/api/phones/add/route.ts`
-   - FastAPI report path must be readable from the Next.js runtime host filesystem
-   - this works for local co-hosted development but becomes fragile if services are separated
-
-## Summary
-
-IntelliFone is implemented as a hybrid marketplace plus AI platform with clear functional separation:
-
-- `web/` handles user workflows, Supabase persistence, auth, and real-time user chat
-- `ai-backend/` handles all ML, LLM, and ingestion pipelines
-- MongoDB supports dynamic AI features:
-  - scraped OLX market data for pricing
-  - extracted YouTube phone opinions for recommendations
-  - assistant chat history
-- Supabase supports application-facing marketplace features:
-  - listings
-  - users
-  - storage
-  - buyer/seller messaging
-
-From an implementation perspective, the strongest modules are:
-
-- the listing verification flow
-- the layered AI pipeline of damage detection -> scoring -> reporting
-- the data-driven price prediction design
-- the recommendation ingestion pipeline from YouTube
-
-The main areas that need cleanup are:
-
-- dependency declarations
-- model file naming consistency
-- Mongo query correctness in recommendations
-- chat schema consistency between `conversation` and `conversations`
+| Area | Purpose |
+| --- | --- |
+| Auth pages | Supabase sign-in, sign-up, OAuth callback |
+| Marketplace | browse and filter user-listed phones |
+| Add phone flow | upload images, trigger AI damage detection, save listing |
+| Recommendation page | collect budget/priority and call backend `/recommend/` |
+| Product detail | show phone listing, seller info, report link |
+| User chat | Supabase + Pusher buyer/seller messaging |
+| Admin | list/manage users and ads |
+
+The web app and AI assistant chat are separate from buyer/seller chat:
+
+- AI assistant chat uses MongoDB in `ai-backend/ChatBot`
+- buyer/seller chat uses Supabase and Pusher in `web/`
+
+## End-to-End Flows
+
+### Seller Verification Flow
+
+1. Seller uploads phone images.
+2. Web app stores images in Supabase Storage.
+3. Web API sends image URLs to FastAPI.
+4. FastAPI downloads images.
+5. YOLO detects damage.
+6. Condition scoring computes `condition_score`.
+7. Report generator creates and uploads PDF.
+8. Marketplace listing is saved with verification results.
+
+### Price Prediction Flow
+
+1. User submits brand, model, RAM, storage, condition, and damage flags.
+2. FastAPI creates a `UsedMobile`.
+3. Price module fetches exact normalized model data from MongoDB.
+4. Recent 60-day listings are used if at least 50 valid records exist.
+5. Otherwise all historical matching records are used.
+6. Random forest trains on current data.
+7. Rule-based condition and damage adjustments are applied.
+8. Min/max price range is returned.
+
+### OLX Scraping Flow
+
+1. Cron chooses brand/model batch.
+2. Scraper searches OLX.
+3. Search page listings are title pre-filtered.
+4. Relevant detail pages are fetched.
+5. DeepSeek validates exact model and extracts structured fields.
+6. MongoDB stores unique listings by link.
+7. Price prediction later consumes the data.
+
+### YouTube Recommendation Flow
+
+1. Watcher checks configured channels.
+2. DeepSeek classifies videos as relevant or irrelevant.
+3. Relevant videos are transcript-processed.
+4. DeepSeek extracts phones, summaries, and price ranges.
+5. MongoDB stores phone recommendation records with source channel and weight.
+6. Runtime recommender fetches under-budget candidates.
+7. DeepSeek ranks candidates by user priority.
+
+## Current Strengths
+
+- Clear split between marketplace data and AI data.
+- OLX scraper now preserves older pricing data for fallback.
+- Price prediction avoids model-variant mixing through normalized exact matching.
+- YouTube recommendation records now carry source metadata and channel trust weights.
+- DeepSeek configuration is consistent across LLM modules.
+- Damage detection, condition scoring, report generation, and price prediction form a coherent verification pipeline.
+
+## Current Limitations and Improvement Ideas
+
+### OLX Scraping
+
+- OLX CSS selectors use generated class names and may break.
+- LLM extraction depends on seller text quality.
+- Pakistani price phrases such as `1 lac` or `1.5 lakh` could be parsed more explicitly.
+- The local test run at the bottom of `olx_scraper_service.py` is currently commented; keep it disabled for production imports.
+
+### Price Prediction
+
+- Random forest trains on every request.
+- Add model caching per brand/model to reduce latency.
+- Add outlier filtering for fake OLX prices.
+- Return confidence metadata:
+  - records used
+  - recent-only or historical fallback
+  - uncertainty
+
+### YouTube Recommendations
+
+- Existing old MongoDB `phones` records will not have `phone_name_normalized`, `source_channel`, or `source_weight` until reprocessed.
+- Channel weights are manually configured, which is good for control but needs periodic review.
+- Recommendation ranking relies on LLM interpretation of candidate descriptions.
+- Price extraction from transcripts may still miss phrases like `lac`, `lakh`, or vague prices.
+
+### Web App
+
+- Buyer/seller chat and AI assistant chat are separate systems; this is intentional but should be documented in user-facing architecture.
+- Some web chat schema names should be verified against Supabase tables.
+
+## Active Development Notes
+
+- Use only files under `ai-backend/` for backend development.
+- Root-level duplicate backend files are old untracked copies and do not contain the recent changes.
+- The lean backend venv is under `ai-backend/.venv/`.
+- `ai-backend/requirements.ai-backend.txt` contains the slimmer runtime dependency list for the backend.
+- `ai-backend/Dockerfile` installs `requirements.ai-backend.txt` and starts only the FastAPI API process with Uvicorn.
+- Deploy cron jobs separately from the API container:
+  - OLX cron command: `python DataCronJob/cron_scraper.py`
+  - YouTube cron command: `python DataCronJob/youtube_watcher_service.py`
