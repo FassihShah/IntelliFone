@@ -1,8 +1,26 @@
 import os
+from pathlib import Path
+
+RUNTIME_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".runtime"))
+os.makedirs(RUNTIME_DIR, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(RUNTIME_DIR, "matplotlib"))
+os.environ.setdefault("YOLO_CONFIG_DIR", os.path.join(RUNTIME_DIR, "ultralytics"))
+
+try:
+    config_parent = Path.home() / "AppData" / "Roaming"
+    config_dir = config_parent / "Ultralytics"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    write_test = config_parent / ".write_test"
+    write_test.write_text("", encoding="utf-8")
+    write_test.unlink(missing_ok=True)
+except OSError:
+    os.environ["USERPROFILE"] = RUNTIME_DIR
+    os.environ["HOME"] = RUNTIME_DIR
+    Path.home = classmethod(lambda cls: Path(RUNTIME_DIR))
+
 import cv2
 import matplotlib.pyplot as plt
 from shapely.geometry import Polygon
-from ultralytics import YOLO
 
 
 # Define damage measurement type
@@ -42,15 +60,17 @@ def process_yolo_result(result, side_name):
     return {side_name: damages}
 
 
-def analyze_phone_images(model_path, side_images, show_output=True, save_output=False):
+def analyze_phone_images(model_path, side_images, show_output=True, save_output=False, output_dir="outputs"):
     """
     Runs YOLO segmentation on all VALID phone side images.
     Displays each result inline with Matplotlib.
     """
+    from ultralytics import YOLO
+
     model = YOLO(model_path)
     final_output = {"damages": {}}
 
-    os.makedirs("outputs", exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     for side, path in side_images.items():
         if not path or not os.path.exists(path):
@@ -63,7 +83,7 @@ def analyze_phone_images(model_path, side_images, show_output=True, save_output=
 
         # Plot YOLO detections
         res_img = result.plot()  # returns annotated frame
-        output_path = os.path.join("outputs", f"{side}_output.jpg")
+        output_path = os.path.join(output_dir, f"{side}_output.jpg")
 
         if save_output:
             cv2.imwrite(output_path, res_img)

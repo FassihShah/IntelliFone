@@ -1,4 +1,4 @@
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 import os
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 import re
@@ -88,10 +88,11 @@ def generate_reply(chat_history, user_message):
 
         return rec_response["recommendations"]
 
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+    llm = ChatOpenAI(
+        model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
         temperature=0.3,
-        google_api_key=os.getenv("GOOGLE_API_KEY")
+        api_key=os.getenv("DEEPSEEK_API_KEY"),
+        base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     )
 
     messages = [SystemMessage(content=SYSTEM_PROMPT)]

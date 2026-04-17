@@ -4,6 +4,7 @@ from sklearn.ensemble import RandomForestRegressor
 import pandas as pd
 import re
 import os
+from datetime import datetime, timedelta, timezone
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
@@ -21,6 +22,32 @@ COLLECTION_NAME = "used_mobiles"
 client = MongoClient(MONGO_URI)
 db = client[DB_NAME]
 collection = db[COLLECTION_NAME]
+
+def ensure_price_prediction_indexes():
+    try:
+        for index_name, index_info in collection.index_information().items():
+            if index_info.get("key") == [("extraction_date", 1)] and "expireAfterSeconds" in index_info:
+                collection.drop_index(index_name)
+
+        collection.create_index([("extraction_date", 1)])
+    except Exception as e:
+        print("Price prediction index setup skipped/failed:", e)
+
+RECENT_LISTINGS_DAYS = 60
+MIN_RECENT_LISTINGS = 50
+MIN_TRAINING_LISTINGS = 20
+
+
+def normalize_phone_text(value: str | None, brand: str | None = None) -> str:
+    if not value:
+        return ""
+
+    text = value.lower()
+    if brand:
+        for token in re.findall(r"[a-z0-9]+", brand.lower()):
+            text = re.sub(rf"\b{re.escape(token)}\b", " ", text)
+
+    return "".join(re.findall(r"[a-z0-9]+", text))
 
 # =====================================================
 # CONDITION SCORE DERIVATION (FOR OLX DATA)
@@ -48,11 +75,9 @@ def derive_condition_score(mobile: UsedMobile) -> float | None:
 # =====================================================
 # FETCH TRAINING DATA
 # =====================================================
-def fetch_training_data(input_model: str, db: Collection = collection) -> List[UsedMobile]:
-    query = {"model": {"$regex": re.escape(input_model), "$options": "i"}}
-
+def _build_valid_mobiles(docs) -> List[UsedMobile]:
     mobiles = []
-    for doc in db.find(query):
+    for doc in docs:
         try:
             if "images" in doc and isinstance(doc["images"], str):
                 doc["images"] = [i.strip() for i in doc["images"].split(",") if i.strip()]
@@ -68,7 +93,53 @@ def fetch_training_data(input_model: str, db: Collection = collection) -> List[U
         except Exception:
             continue
 
-    if len(mobiles) < 20:
+    return mobiles
+
+
+def _is_recent_listing(doc: dict, cutoff: datetime) -> bool:
+    extraction_date = doc.get("extraction_date")
+    if not isinstance(extraction_date, datetime):
+        return False
+
+    if extraction_date.tzinfo is not None:
+        extraction_date = extraction_date.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return extraction_date >= cutoff
+
+
+def _matches_requested_phone(doc: dict, input_model: str, input_brand: str | None = None) -> bool:
+    expected_model = normalize_phone_text(input_model, input_brand)
+    doc_model = normalize_phone_text(doc.get("model"), input_brand)
+
+    if not expected_model or doc_model != expected_model:
+        return False
+
+    if input_brand:
+        expected_brand = normalize_phone_text(input_brand)
+        doc_brand = normalize_phone_text(doc.get("brand"))
+        if doc_brand and doc_brand != expected_brand:
+            return False
+
+    return True
+
+
+def fetch_training_data(input_model: str, input_brand: str | None = None, db: Collection = collection) -> List[UsedMobile]:
+    query = {"model": {"$regex": re.escape(input_model), "$options": "i"}}
+    cutoff = datetime.utcnow() - timedelta(days=RECENT_LISTINGS_DAYS)
+
+    all_docs = [
+        doc for doc in db.find(query).sort("extraction_date", -1)
+        if _matches_requested_phone(doc, input_model, input_brand)
+    ]
+    recent_docs = [doc for doc in all_docs if _is_recent_listing(doc, cutoff)]
+
+    recent_mobiles = _build_valid_mobiles(recent_docs)
+    if len(recent_mobiles) >= MIN_RECENT_LISTINGS:
+        return recent_mobiles
+
+    mobiles = _build_valid_mobiles(all_docs)
+
+    if len(mobiles) < MIN_TRAINING_LISTINGS:
         raise RuntimeError(f"Only {len(mobiles)} valid records found.")
 
     return mobiles
@@ -227,7 +298,7 @@ def predict_price_range(model, input_df, training_df, mobile, ai_flags):
 # FINAL PIPELINE
 # =====================================================
 def run_pipeline(input_mobile: UsedMobile, ai_flags: dict, db: Collection = collection):
-    training_data = fetch_training_data(input_mobile.model, db)
+    training_data = fetch_training_data(input_mobile.model, input_mobile.brand, db)
 
     input_df = preprocess_input_mobile(input_mobile)
     training_df = preprocess_training_data(training_data)

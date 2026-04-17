@@ -3,7 +3,7 @@ import sys
 from datetime import datetime
 from pymongo import MongoClient
 from dotenv import load_dotenv
-from olx_scraper_service import scrape_used_data  
+from olx_scraper_service import ensure_olx_indexes, scrape_used_data  
 
 
 load_dotenv()
@@ -62,6 +62,8 @@ def update_model_index(brand, current_index, models_len, batch_size=10):
 # ---------------------------
 
 def run_round_robin_scraper(batch_size=10):
+    ensure_olx_indexes()
+
     print("======================================")
     print("Cron Job Started:", datetime.now())
     print("======================================")
