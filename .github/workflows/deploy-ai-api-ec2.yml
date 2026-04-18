@@ -47,7 +47,7 @@ jobs:
 
             cd ai-backend
             source .venv/bin/activate
-            pip install -r requirements.ai-backend.txt
+            pip install --no-cache-dir -r requirements.ai-backend.txt
             python -m compileall main_api.py
 
             sudo systemctl restart intellifone-ai-api

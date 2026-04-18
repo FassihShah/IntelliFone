@@ -17,8 +17,9 @@ reportlab
 requests==2.32.4
 scikit-learn==1.7.1
 shapely
-torch==2.5.1
-torchvision==0.20.1
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
+torchvision==0.20.1+cpu
 ultralytics==8.0.134
 uvicorn[standard]==0.30.6
 youtube-transcript-api==1.2.2
