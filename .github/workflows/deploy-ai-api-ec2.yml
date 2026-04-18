@@ -51,6 +51,19 @@ jobs:
             python -m compileall main_api.py
 
             sudo systemctl restart intellifone-ai-api
-            sleep 5
-            curl -fsS http://127.0.0.1:8000/health
+
+            for attempt in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8000/health; then
+                echo "API health check passed"
+                exit 0
+              fi
+
+              echo "Waiting for API to become healthy... attempt ${attempt}/30"
+              sleep 2
+            done
+
+            echo "API did not become healthy in time. Recent service logs:"
+            sudo systemctl status intellifone-ai-api --no-pager || true
+            sudo journalctl -u intellifone-ai-api -n 120 --no-pager || true
+            exit 1
           EOF
