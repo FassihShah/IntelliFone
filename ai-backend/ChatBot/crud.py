@@ -54,3 +54,18 @@ def get_chat_history_formatted(conversation_id: str) -> ChatHistoryResponse:
         conversation_id=conversation_id,
         messages=messages
     )
+
+
+def get_user_conversations(user_id: str):
+    convs = conversations_col.find(
+        {"user_id": user_id}
+    ).sort("updated_at", -1)
+
+    return [
+        {
+            "conversation_id": str(c["_id"]),
+            "title": c.get("title", "Untitled"),
+            "updated_at": c.get("updated_at").isoformat() if c.get("updated_at") else None
+        }
+        for c in convs
+    ]
