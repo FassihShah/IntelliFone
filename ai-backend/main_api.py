@@ -12,7 +12,7 @@ from ConditionScoring.condition_scoring import compute_condition_score
 from DamageDetection.Damage_Detection import analyze_phone_images
 from PricePrediction.predict_price_service import ensure_price_prediction_indexes, run_pipeline
 from models import UsedMobile
-from report_generator import generate_damage_report, upload_report_to_supabase
+from ReportGenerator.report_generator import generate_damage_report, upload_report_to_supabase
 
 
 app = FastAPI(title="IntelliFone AI API")
