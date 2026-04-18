@@ -65,9 +65,15 @@ def analyze_phone_images(model_path, side_images, show_output=True, save_output=
     Runs YOLO segmentation on all VALID phone side images.
     Displays each result inline with Matplotlib.
     """
+    import torch
+    from ultralytics.nn.tasks import SegmentationModel
     from ultralytics import YOLO
 
+    # 🔥 FIX FOR PYTORCH 2.6 ISSUE (ADD THIS LINE)
+    torch.serialization.add_safe_globals([SegmentationModel]) 
+
     model = YOLO(model_path)
+
     final_output = {"damages": {}}
 
     os.makedirs(output_dir, exist_ok=True)
