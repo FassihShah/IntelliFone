@@ -17,7 +17,7 @@ from PricePrediction.predict_price_service import ensure_price_prediction_indexe
 from ConditionScoring.condition_scoring import compute_condition_score 
 from RecommendationEngine.recommendation_service import ensure_recommendation_indexes, get_recommendations, stream_recommendations
 from models import ChatRequest, ChatResponse, ChatHistoryResponse
-from ChatBot.chatbot import generate_reply, generate_stream_reply
+from ChatBot.chatbot import generate_reply, generate_stream_reply,get_user_conversations
 from ChatBot.crud import (
     create_conversation,
     get_chat_history,
@@ -452,3 +452,9 @@ async def chat_stream(req: ChatRequest):
 async def get_chat(conversation_id: str):
     history = get_chat_history_formatted(conversation_id)
     return history
+
+#get all conversations of user with the chatbot 
+@app.get("/conversations/{user_id}")
+async def get_conversations(user_id: str):
+    convs = get_user_conversations(user_id)
+    return {"conversations": convs}
