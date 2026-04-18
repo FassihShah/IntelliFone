@@ -25,9 +25,21 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/intellifone-key.pem
           chmod 600 ~/.ssh/intellifone-key.pem
-          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
 
-          ssh -i ~/.ssh/intellifone-key.pem "$EC2_USER@$EC2_HOST" << 'EOF'
+          HOST="$(printf '%s' "$EC2_HOST" | tr -d '[:space:]')"
+          HOST="${HOST#http://}"
+          HOST="${HOST#https://}"
+          HOST="${HOST#*@}"
+          HOST="${HOST%%/*}"
+          HOST="${HOST%%:*}"
+
+          USERNAME="$(printf '%s' "$EC2_USER" | tr -d '[:space:]')"
+          USERNAME="${USERNAME%@*}"
+          USERNAME="${USERNAME:-ubuntu}"
+
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+
+          ssh -i ~/.ssh/intellifone-key.pem "$USERNAME@$HOST" << 'EOF'
             set -euo pipefail
 
             cd /home/ubuntu/IntelliFone
