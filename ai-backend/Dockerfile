@@ -35,5 +35,5 @@ RUN mkdir -p .runtime
 # Expose FastAPI port
 EXPOSE 8000
 
-# Start FastAPI
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start API-only FastAPI service
+CMD ["uvicorn", "main_api:app", "--host", "0.0.0.0", "--port", "8000"]
