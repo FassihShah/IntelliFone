@@ -5,10 +5,17 @@ import ChatSidebar from "../components/ChatSideBar";
 import ChatWindow from "../components/ChatWindow";
 import { supabase } from "../lib/supabaseClient";
 
+interface Conversation {
+  id: string;
+  mongo_conversation_id: string;
+  title?: string;
+}
+
 export default function ChatPage() {
   const [userId, setUserId] = useState<string>("");
   const [selectedConversation, setSelectedConversation] = useState<string>("");
-  const [conversations, setConversations] = useState<{ id: string; mongo_conversation_id: string }[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [loadingConvs, setLoadingConvs] = useState(false);
 
   // 1️⃣ Get current user
   useEffect(() => {
@@ -19,54 +26,54 @@ export default function ChatPage() {
     fetchUser();
   }, []);
 
-  // 2️⃣ Fetch conversations for this user
-  useEffect(() => {
-    if (!userId) return;
-
-    async function fetchConversations() {
-      const { data, error } = await supabase
-        .from("conversations")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
-
-      if (!error && data) setConversations(data as { id: string; mongo_conversation_id: string }[]);
+  // 2️⃣ Fetch conversations from MongoDB via FastAPI
+  const fetchConversations = async (uid: string) => {
+    if (!uid) return;
+    setLoadingConvs(true);
+    try {
+      const res = await fetch(`/api/chat?user_id=${encodeURIComponent(uid)}`);
+      const data = await res.json();
+      if (data.conversations) {
+        setConversations(
+          data.conversations.map((c: { conversation_id: string; title?: string }) => ({
+            id: c.conversation_id,
+            mongo_conversation_id: c.conversation_id,
+            title: c.title,
+          }))
+        );
+      }
+    } catch (err) {
+      console.error("Failed to fetch conversations:", err);
+    } finally {
+      setLoadingConvs(false);
     }
+  };
 
-    fetchConversations();
+  useEffect(() => {
+    if (userId) fetchConversations(userId);
   }, [userId]);
 
   // 3️⃣ Handle conversation selection or new chat
   const handleSelectConversation = async (mongoId: string) => {
     if (!mongoId) {
-      // Create new conversation in backend
-      const initialMessage = "Hi!"; // optional starter message
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: userId,
-          message: initialMessage,
-          conversation_id: null, // null triggers backend to create
-        }),
-      });
-      const data = await res.json();
-
-      const newMongoId = data.conversation_id;
-
-      // Save in Supabase
-      const { error } = await supabase.from("conversations").insert([
-        { user_id: userId, mongo_conversation_id: newMongoId },
-      ]);
-
-      if (!error) {
-        setConversations([{ id: newMongoId, mongo_conversation_id: newMongoId }, ...conversations]);
-        setSelectedConversation(newMongoId);
-      }
-    } else {
-      // Existing conversation
-      setSelectedConversation(mongoId);
+      // New chat — clear selection
+      setSelectedConversation("");
+      return;
     }
+    setSelectedConversation(mongoId);
+
+    // Optimistically add to sidebar if not already present
+    setConversations((prev) => {
+      if (prev.some((c) => c.mongo_conversation_id === mongoId)) return prev;
+      return [{ id: mongoId, mongo_conversation_id: mongoId }, ...prev];
+    });
+  };
+
+  // 4️⃣ Called by ChatWindow after a new conversation is created via streaming
+  const handleNewConversation = async (mongoId: string) => {
+    setSelectedConversation(mongoId);
+    // Re-fetch so we get the real title from MongoDB
+    await fetchConversations(userId);
   };
 
   return (
@@ -74,12 +81,14 @@ export default function ChatPage() {
       <ChatSidebar
         onSelect={handleSelectConversation}
         userId={userId}
-        conversations={conversations} // pass all conversations to sidebar
+        conversations={conversations}
+        loading={loadingConvs}
+        selectedConversationId={selectedConversation}
       />
       <ChatWindow
         userId={userId}
         conversationId={selectedConversation}
-        onNewConversation={handleSelectConversation} // reuse same handler
+        onNewConversation={handleNewConversation}
       />
     </div>
   );
