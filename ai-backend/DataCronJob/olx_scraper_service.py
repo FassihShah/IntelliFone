@@ -423,6 +423,26 @@ ACCESSORY_TERMS = {
     "handsfree",
     "protector",
 }
+NON_PHONE_LISTING_TERMS = {
+    "account",
+    "accounts",
+    "acc",
+    "game",
+    "gaming",
+    "id",
+    "pubg",
+}
+BRAND_ALIASES = {
+    "apple": {"apple", "iphone"},
+    "google": {"google", "pixel"},
+    "oneplus": {"oneplus", "one plus"},
+    "oppo": {"oppo"},
+    "realme": {"realme"},
+    "samsung": {"samsung", "galaxy"},
+    "tecno": {"tecno", "camon", "spark", "pova"},
+    "vivo": {"vivo", "iqoo"},
+    "xiaomi": {"xiaomi", "redmi", "poco", "mi"},
+}
 REQUIRED_MODEL_CATALOG = None
 
 
@@ -435,6 +455,37 @@ def raw_tokens(text: str):
 
 def compact_text(text: str):
     return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def normalized_text(text: str):
+    return " ".join(raw_tokens(text))
+
+
+def brand_aliases_for(brand: str):
+    brand_key = compact_text(brand)
+    aliases = BRAND_ALIASES.get(brand_key, set())
+    return set(aliases) | {brand.lower()}
+
+
+def title_has_brand_signal(title: str, brand: str):
+    normalized_title = f" {normalized_text(title)} "
+    compact_title = compact_text(title)
+
+    for alias in brand_aliases_for(brand):
+        normalized_alias = f" {normalized_text(alias)} "
+        compact_alias = compact_text(alias)
+
+        if normalized_alias.strip() and normalized_alias in normalized_title:
+            return True
+
+        if compact_alias and len(compact_alias) >= 3 and compact_alias in compact_title:
+            return True
+
+    return False
+
+
+def has_non_phone_listing_terms(title: str):
+    return bool(NON_PHONE_LISTING_TERMS.intersection(set(raw_tokens(title))))
 
 
 def model_required_tokens(model: str, brand: str):
@@ -478,6 +529,7 @@ def load_required_model_catalog():
                     "model": model,
                     "tokens": tokens,
                     "compact": "".join(tokens),
+                    "brand_signal": brand_aliases_for(brand),
                     "score": (len(tokens), len("".join(tokens))),
                 })
 
@@ -489,10 +541,24 @@ def load_required_model_catalog():
     return REQUIRED_MODEL_CATALOG
 
 
-def title_contains_required_model(title: str, required_tokens):
+def numeric_token_is_storage_noise(title: str, token: str):
+    if not token.isdigit():
+        return False
+
+    escaped = re.escape(token)
+    storage_patterns = [
+        rf"(?<![a-z0-9]){escaped}\s*/\s*\d{{2,4}}(?![a-z0-9])",
+        rf"(?<![a-z0-9])\d{{1,3}}\s*/\s*{escaped}(?![a-z0-9])",
+        rf"(?<![a-z0-9]){escaped}\s*(gb|g|ram|rom)\b",
+    ]
+    return any(re.search(pattern, title.lower()) for pattern in storage_patterns)
+
+
+def title_has_model_match(title: str, required_tokens, brand: str, require_brand_signal: bool):
     title_token_set = set(raw_tokens(title))
     compact_title = compact_text(title)
     compact_required = "".join(required_tokens)
+    brand_signal = title_has_brand_signal(title, brand)
     unmatched_variants = MODEL_VARIANT_TOKENS.intersection(title_token_set) - set(required_tokens)
     compact_variant_extensions = [
         variant
@@ -500,13 +566,28 @@ def title_contains_required_model(title: str, required_tokens):
         if f"{compact_required}{variant}" in compact_title
     ]
 
+    if require_brand_signal and not brand_signal:
+        return False
+
+    if "plus" in required_tokens and compact_text(brand) != "oneplus":
+        if re.search(r"\bone\s+plus\b", normalized_text(title)):
+            return False
+
+    if any(numeric_token_is_storage_noise(title, token) for token in required_tokens):
+        return False
+
     if unmatched_variants or compact_variant_extensions:
         return False
 
     if all(token in title_token_set for token in required_tokens):
         return True
 
-    return bool(compact_required and compact_required in compact_title)
+    compact_match_allowed = len(compact_required) >= 5
+    compact_match_allowed = compact_match_allowed or (
+        brand_signal and len(required_tokens) > 1 and len(compact_required) >= 4
+    )
+
+    return bool(compact_match_allowed and compact_required and compact_required in compact_title)
 
 
 def choose_best_model_candidate(candidates):
@@ -553,15 +634,28 @@ def detect_required_model_from_title(title: str, fallback_model: str, fallback_b
     if accessory_hits and "phone" not in lower_title and "mobile" not in lower_title:
         return None
 
+    if has_non_phone_listing_terms(title):
+        return None
+
     fallback_tokens = model_required_tokens(fallback_model, fallback_brand)
-    if fallback_tokens and title_contains_required_model(title, fallback_tokens):
+    if fallback_tokens and title_has_model_match(
+        title,
+        fallback_tokens,
+        fallback_brand,
+        require_brand_signal=False,
+    ):
         return fallback_brand, fallback_model
 
     catalog = load_required_model_catalog()
     candidates = [
         item
         for item in catalog
-        if title_contains_required_model(title, item["tokens"])
+        if title_has_model_match(
+            title,
+            item["tokens"],
+            item["brand"],
+            require_brand_signal=True,
+        )
     ]
 
     detected = choose_best_model_candidate(candidates)
