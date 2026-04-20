@@ -1,9 +1,11 @@
 import os
 import sys
 from datetime import datetime
-from pymongo import MongoClient
+
 from dotenv import load_dotenv
-from olx_scraper_service import ensure_olx_indexes, scrape_used_data  
+from pymongo import MongoClient
+
+from olx_scraper_service import ensure_olx_indexes, scrape_used_data
 
 
 load_dotenv()
@@ -18,33 +20,30 @@ db = client[DB_NAME]
 collection = db[COLLECTION_NAME]
 
 
-
-def get_next_batch(models, start_index, batch_size=10):
+def get_next_batch(models, start_index, batch_size=5):
     """
-    Returns a batch of models in a safe, wrap-around manner.
+    Returns the next models in a safe, wrap-around manner.
     """
-    end_index = start_index + batch_size
+    if not models:
+        return []
 
-    if start_index >= len(models):  # wrap around fully
-        start_index = 0
-        end_index = batch_size
+    start_index = start_index % len(models)
+    batch_count = min(batch_size, len(models))
 
-    batch = models[start_index:end_index]
-
-    # If end_index exceeds list → wrap remaining items from start
-    if not batch:
-        batch = models[0:batch_size]
-
-    return batch
+    return [
+        models[(start_index + offset) % len(models)]
+        for offset in range(batch_count)
+    ]
 
 
-def update_model_index(brand, current_index, models_len, batch_size=10):
+def update_model_index(brand, new_index, models_len):
     """
-    Moves pointer forward and wraps around automatically.
+    Saves the next model index and wraps around automatically.
     """
-    new_index = current_index + batch_size
-    if new_index >= models_len:
+    if models_len <= 0:
         new_index = 0
+    else:
+        new_index = new_index % models_len
 
     collection.update_one(
         {"brand": brand},
@@ -61,7 +60,7 @@ def update_model_index(brand, current_index, models_len, batch_size=10):
 # MAIN ROUND-ROBIN SCRAPER
 # ---------------------------
 
-def run_round_robin_scraper(batch_size=10):
+def run_round_robin_scraper(batch_size=5):
     ensure_olx_indexes()
 
     print("======================================")
@@ -70,40 +69,42 @@ def run_round_robin_scraper(batch_size=10):
 
     brands = list(collection.find({}))
     if not brands:
-        print("❌ No brands found in DB.")
+        print("No brands found in DB.")
         sys.exit(0)
 
     for brand_doc in brands:
         brand = brand_doc["brand"]
         models = brand_doc["models"]
-        model_index = brand_doc.get("model_index", 0)
 
-        print(f"\n🔵 Brand: {brand}")
-        print(f"➡️  Starting at model_index: {model_index}")
+        if not models:
+            print(f"No models found for brand: {brand}")
+            continue
 
-        # 1️⃣ Get next 10 models
+        model_index = brand_doc.get("model_index", 0) % len(models)
+
+        print(f"\nBrand: {brand}")
+        print(f"Starting at model_index: {model_index}")
+
         batch = get_next_batch(models, model_index, batch_size)
-        print(f"📌 Models in this batch ({len(batch)}): {batch}")
+        print(f"Models in this batch ({len(batch)}): {batch}")
 
-        # 2️⃣ Scrape each model
-        for model in batch:
-            print(f"\n🚀 Scraping → {brand} / {model}")
+        for offset, model in enumerate(batch):
+            current_model_index = (model_index + offset) % len(models)
+            next_model_index = (current_model_index + 1) % len(models)
+
+            print(f"\nScraping -> {brand} / {model}")
             try:
                 scrape_used_data(model, brand)
             except Exception as e:
-                print(f"❌ Error scraping {brand} {model}:", e)
+                print(f"Error scraping {brand} {model}:", e)
 
-        # 3️⃣ Update index in DB
-        update_model_index(brand, model_index, len(models), batch_size)
-
-        print(f"✔️ Updated model_index → {brand}")
+            saved_index = update_model_index(brand, next_model_index, len(models))
+            print(f"Updated model_index -> {brand}: {saved_index}")
 
     print("\n======================================")
     print("Cron Job Finished:", datetime.now())
     print("======================================")
 
 
-
-
 if __name__ == "__main__":
-    run_round_robin_scraper(batch_size=10)
+    run_round_robin_scraper(batch_size=5)
