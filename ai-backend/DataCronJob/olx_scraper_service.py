@@ -28,9 +28,11 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}
 MONGO_URI = os.getenv("MONGO_CONNECTION_STRING")
 DB_NAME = "MobileDB"
 COLLECTION_NAME = "used_mobiles"
+BRAND_COLLECTION_NAME = "mobile_brands"
 client = MongoClient(MONGO_URI)
 db = client[DB_NAME]
 collection = db[COLLECTION_NAME]
+brand_collection = db[BRAND_COLLECTION_NAME]
 
 def ensure_olx_indexes():
     try:
@@ -375,6 +377,10 @@ def extract_data(data: dict, model, brand):
         success = save_to_db(mobile, data["link"])
 
         if success:
+            print(
+                f"Saved as: {mobile.brand} {mobile.model} "
+                f"| title: {data.get('title', '')}"
+            )
             print(f"✅ Extracted: {mobile.model} with title: {data.get('title', '')}")
             return True
 
@@ -386,28 +392,187 @@ def extract_data(data: dict, model, brand):
 # ============================================================
 # Scrape OLX Listings
 # ============================================================
-def title_matches_model(title: str, model_query: str, brand: str):
-    """
-    Cheap pre-filter before opening detail pages.
-    The LLM still does the final strict model check.
-    """
-    title_tokens = set(re.findall(r"[a-z0-9]+", title.lower()))
-    brand_tokens = set(re.findall(r"[a-z0-9]+", brand.lower()))
-    model_tokens = [
+IGNORED_MODEL_TOKENS = {"4g", "5g", "lte"}
+MODEL_VARIANT_TOKENS = {
+    "edge",
+    "fe",
+    "flip",
+    "fold",
+    "lite",
+    "max",
+    "mini",
+    "note",
+    "plus",
+    "pro",
+    "se",
+    "ultra",
+}
+OPTIONAL_MODEL_TOKENS_BY_BRAND = {
+    "samsung": {"galaxy"},
+}
+ACCESSORY_TERMS = {
+    "accessory",
+    "accessories",
+    "adapter",
+    "airpods",
+    "cable",
+    "case",
+    "charger",
+    "charging",
+    "cover",
+    "handsfree",
+    "protector",
+}
+REQUIRED_MODEL_CATALOG = None
+
+
+def raw_tokens(text: str):
+    normalized = (text or "").lower()
+    normalized = normalized.replace("+", " plus ")
+    normalized = re.sub(r"\bpromax\b", "pro max", normalized)
+    return re.findall(r"[a-z0-9]+", normalized)
+
+
+def compact_text(text: str):
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def model_required_tokens(model: str, brand: str):
+    brand_key = (brand or "").lower()
+    brand_tokens = set(raw_tokens(brand))
+    optional_tokens = OPTIONAL_MODEL_TOKENS_BY_BRAND.get(brand_key, set())
+
+    return [
         token
-        for token in re.findall(r"[a-z0-9]+", model_query.lower())
-        if token not in brand_tokens and token not in {"4g", "5g"}
+        for token in raw_tokens(model)
+        if token not in brand_tokens
+        and token not in IGNORED_MODEL_TOKENS
+        and token not in optional_tokens
     ]
 
-    if not model_tokens:
+
+def load_required_model_catalog():
+    """
+    Builds a conservative list of known models from mobile_brands.
+    We only opportunistically save off-query listings if they match this list.
+    """
+    global REQUIRED_MODEL_CATALOG
+
+    if REQUIRED_MODEL_CATALOG is not None:
+        return REQUIRED_MODEL_CATALOG
+
+    catalog = []
+
+    try:
+        for brand_doc in brand_collection.find({}):
+            brand = brand_doc.get("brand", "")
+            models = brand_doc.get("models", [])
+
+            for model in models:
+                tokens = model_required_tokens(model, brand)
+                if not tokens:
+                    continue
+
+                catalog.append({
+                    "brand": brand,
+                    "model": model,
+                    "tokens": tokens,
+                    "compact": "".join(tokens),
+                    "score": (len(tokens), len("".join(tokens))),
+                })
+
+    except Exception as e:
+        print("Required model catalog load failed:", e)
+        catalog = []
+
+    REQUIRED_MODEL_CATALOG = catalog
+    return REQUIRED_MODEL_CATALOG
+
+
+def title_contains_required_model(title: str, required_tokens):
+    title_token_set = set(raw_tokens(title))
+    compact_title = compact_text(title)
+    compact_required = "".join(required_tokens)
+    unmatched_variants = MODEL_VARIANT_TOKENS.intersection(title_token_set) - set(required_tokens)
+    compact_variant_extensions = [
+        variant
+        for variant in MODEL_VARIANT_TOKENS - set(required_tokens)
+        if f"{compact_required}{variant}" in compact_title
+    ]
+
+    if unmatched_variants or compact_variant_extensions:
+        return False
+
+    if all(token in title_token_set for token in required_tokens):
         return True
 
-    if all(token in title_tokens for token in model_tokens):
-        return True
+    return bool(compact_required and compact_required in compact_title)
 
-    compact_title = re.sub(r"[^a-z0-9]", "", title.lower())
-    compact_model = "".join(model_tokens)
-    return compact_model in compact_title
+
+def choose_best_model_candidate(candidates):
+    if not candidates:
+        return None
+
+    candidates = sorted(
+        candidates,
+        key=lambda item: item["score"],
+        reverse=True,
+    )
+
+    best = candidates[0]
+    tied = [
+        candidate
+        for candidate in candidates
+        if candidate["score"] == best["score"]
+        and (
+            candidate["brand"] != best["brand"]
+            or candidate["model"] != best["model"]
+        )
+    ]
+
+    if tied:
+        return None
+
+    if len(candidates) > 1:
+        second_best = candidates[1]
+        if second_best["score"] == best["score"]:
+            return None
+
+    return best
+
+
+def detect_required_model_from_title(title: str, fallback_model: str, fallback_brand: str):
+    """
+    Detects the exact required model represented by a listing title.
+    This is intentionally limited to models from mobile_brands and remains
+    backed by the LLM's strict verification after the detail page is fetched.
+    """
+    lower_title = (title or "").lower()
+    accessory_hits = ACCESSORY_TERMS.intersection(set(raw_tokens(lower_title)))
+
+    if accessory_hits and "phone" not in lower_title and "mobile" not in lower_title:
+        return None
+
+    fallback_tokens = model_required_tokens(fallback_model, fallback_brand)
+    if fallback_tokens and title_contains_required_model(title, fallback_tokens):
+        return fallback_brand, fallback_model
+
+    catalog = load_required_model_catalog()
+    candidates = [
+        item
+        for item in catalog
+        if title_contains_required_model(title, item["tokens"])
+    ]
+
+    detected = choose_best_model_candidate(candidates)
+
+    if detected:
+        return detected["brand"], detected["model"]
+
+    if candidates:
+        return None
+
+    return None
 
 
 def get_ads_from_page(page_num, model_query, brand):
@@ -446,9 +611,20 @@ def get_ads_from_page(page_num, model_query, brand):
             location = location_tag.text.strip()
             link = "https://www.olx.com.pk" + link_tag["href"]
 
-            if not title_matches_model(title, model_query, brand):
+            detected_model = detect_required_model_from_title(title, model_query, brand)
+            if not detected_model:
                 print("Skipping detail fetch (title pre-filter):", title)
                 continue
+
+            target_brand, target_model = detected_model
+
+            if target_brand != brand or target_model != model_query:
+                print(
+                    "Detected required model from off-query result:",
+                    f"{target_brand} {target_model}",
+                    "| title:",
+                    title,
+                )
 
             ad_res = fetch(link)
             if not ad_res:
@@ -482,7 +658,7 @@ def get_ads_from_page(page_num, model_query, brand):
                 "images": ", ".join(image_urls)
             }
 
-            success = extract_data(data, model_query, brand)
+            success = extract_data(data, target_model, target_brand)
             if success:
                 listings.append(data)
 
