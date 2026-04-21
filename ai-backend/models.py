@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional, List
+from datetime import datetime
 
 
 class UsedMobile(BaseModel):
@@ -67,6 +68,21 @@ class NewMobile(BaseModel):
 
     price: Optional[str] = None    
 
+
+
+class MobileSpecsRequest(BaseModel):
+    brand: str
+    model: str
+    refresh: bool = False
+
+
+class MobileSpecsResponse(BaseModel):
+    brand: str
+    model: str
+    gsmarena_url: Optional[str] = None
+    specs: NewMobile
+    cached: bool
+    updated_at: Optional[datetime] = None
 
 
 class ChatRequest(BaseModel):

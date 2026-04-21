@@ -16,7 +16,9 @@ from DamageDetection.Damage_Detection import analyze_phone_images
 from PricePrediction.predict_price_service import ensure_price_prediction_indexes, run_pipeline
 from ConditionScoring.condition_scoring import compute_condition_score 
 from RecommendationEngine.recommendation_service import ensure_recommendation_indexes, get_recommendations, stream_recommendations
+from SpecsFetcher.specs_service import ensure_specs_cache_indexes, fetch_mobile_specs
 from models import ChatRequest, ChatResponse, ChatHistoryResponse
+from models import MobileSpecsRequest, MobileSpecsResponse
 from ChatBot.chatbot import generate_reply, generate_stream_reply,get_user_conversations
 from ChatBot.crud import (
     create_conversation,
@@ -68,6 +70,7 @@ def startup_checks():
     validate_startup_configuration()
     ensure_price_prediction_indexes()
     ensure_recommendation_indexes()
+    ensure_specs_cache_indexes()
 
 
 
@@ -79,6 +82,22 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+@app.post("/mobile-specs/", response_model=MobileSpecsResponse)
+async def mobile_specs(payload: MobileSpecsRequest):
+    try:
+        return fetch_mobile_specs(
+            payload.brand.strip(),
+            payload.model.strip(),
+            refresh=payload.refresh,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch specs: {str(e)}")
 
 
 # # ============================================================

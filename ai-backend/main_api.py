@@ -11,7 +11,8 @@ import uuid
 from ConditionScoring.condition_scoring import compute_condition_score
 from DamageDetection.Damage_Detection import analyze_phone_images
 from PricePrediction.predict_price_service import ensure_price_prediction_indexes, run_pipeline
-from models import UsedMobile
+from SpecsFetcher.specs_service import ensure_specs_cache_indexes, fetch_mobile_specs
+from models import MobileSpecsRequest, MobileSpecsResponse, UsedMobile
 from ReportGenerator.report_generator import generate_damage_report, upload_report_to_supabase
 
 
@@ -56,6 +57,7 @@ def validate_startup_configuration():
 def startup_checks():
     validate_startup_configuration()
     ensure_price_prediction_indexes()
+    ensure_specs_cache_indexes()
 
 
 @app.get("/")
@@ -66,6 +68,22 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+@app.post("/mobile-specs/", response_model=MobileSpecsResponse)
+async def mobile_specs(payload: MobileSpecsRequest):
+    try:
+        return fetch_mobile_specs(
+            payload.brand.strip(),
+            payload.model.strip(),
+            refresh=payload.refresh,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch specs: {str(e)}")
 
 
 class DamageDetectionRequest(BaseModel):
