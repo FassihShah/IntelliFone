@@ -116,7 +116,7 @@ Startup checks require:
 - `DEEPSEEK_API_KEY`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `ai-backend/best3.pt`
+- `ai-backend/best4.pt`
 
 The YOLO import is lazy-loaded inside the damage detection function so the FastAPI app can import cleanly without immediately initializing Ultralytics.
 
@@ -130,6 +130,10 @@ Image inputs are hardened with:
 - HTTP/HTTPS URL validation for image URL workflows
 - image content-type checks
 - max image size enforcement through `MAX_IMAGE_BYTES`
+- a strict two-image URL contract for `/damage-detection/` in this order:
+  - `front`
+  - `back`
+- required `front` and `back` uploads for `/full-verification/`
 - per-request temporary folders for uploaded images, annotated outputs, and generated reports
 
 Why this matters:
@@ -213,14 +217,16 @@ Detect physical damage from phone images using a YOLO segmentation model.
 
 Inputs:
 
-- YOLO model path, usually `ai-backend/best3.pt`
+- YOLO model path, currently `ai-backend/best4.pt`
 - dictionary of side names to local image paths:
   - `front`
   - `back`
-  - `left`
-  - `right`
-  - `top`
-  - `bottom`
+
+Current API contract:
+
+- `/damage-detection/` accepts exactly 2 image URLs, ordered as `front`, `back`
+- `/full-verification/` requires uploaded `front` and `back` images
+- other sides are no longer part of the active verification pipeline
 
 Flow:
 
@@ -245,7 +251,7 @@ Flow:
 
 Why this design:
 
-- Each side is processed independently, making it simple to map damage severity to visible phone areas.
+- Front and back are processed independently, which keeps the mobile capture flow simpler and more consistent for users.
 - The output is compact and usable by condition scoring.
 
 Operational note:
@@ -266,8 +272,7 @@ Flow:
 1. Accepts damage JSON.
 2. Applies side weights:
    - front is most important
-   - back is medium
-   - edges are lower impact
+   - back is slightly lower impact
 3. Applies damage severity weights:
    - crack
    - line
@@ -291,6 +296,7 @@ Why this design:
 
 - The price module needs both a numeric condition score and simple boolean damage flags.
 - Log scaling makes large damage matter without letting a single noisy mask dominate too much.
+- The scoring pipeline now ignores any side outside `front` and `back`, matching the active image-capture contract.
 
 ## Report Generation
 
