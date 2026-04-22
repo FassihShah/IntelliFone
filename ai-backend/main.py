@@ -28,8 +28,9 @@ from ChatBot.crud import (
 )
 
 app = FastAPI(title="IntelliFone AI Backend")
-YOLO_MODEL_PATH = os.path.join(os.path.dirname(__file__), "best3.pt")
-MAX_DAMAGE_IMAGES = 6
+YOLO_MODEL_PATH = os.path.join(os.path.dirname(__file__), "best4.pt")
+DAMAGE_SIDES = ["front", "back"]
+MAX_DAMAGE_IMAGES = len(DAMAGE_SIDES)
 MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", str(10 * 1024 * 1024)))
 
 
@@ -104,7 +105,7 @@ async def mobile_specs(payload: MobileSpecsRequest):
 # #  ENDPOINT 1 — DAMAGE DETECTION
 # # ============================================================
 class DamageDetectionRequest(BaseModel):
-    image_urls: List[str]  # max 6 URLs
+    image_urls: List[str]  # ordered as: front, back
 
 
 def validate_image_url(url: str, index: int):
@@ -176,15 +177,13 @@ def save_upload_file(upload: UploadFile, file_path: str):
 @app.post("/damage-detection/")
 async def damage_detection(payload: DamageDetectionRequest):
 
-    if len(payload.image_urls) == 0:
-        raise HTTPException(status_code=400, detail="At least one image URL is required")
+    if len(payload.image_urls) != MAX_DAMAGE_IMAGES:
+        raise HTTPException(
+            status_code=400,
+            detail="Exactly 2 image URLs are required in this order: front, back",
+        )
 
-    if len(payload.image_urls) > MAX_DAMAGE_IMAGES:
-        raise HTTPException(status_code=400, detail=f"Maximum {MAX_DAMAGE_IMAGES} image URLs allowed")
-
-    # Expected sides (order-based mapping)
-    sides = ["front", "back", "left", "right", "top", "bottom"]
-    saved = {side: None for side in sides}
+    saved = {side: None for side in DAMAGE_SIDES}
 
     with tempfile.TemporaryDirectory(prefix="intellifone_damage_") as request_dir:
         uploads_dir = os.path.join(request_dir, "uploads")
@@ -201,7 +200,7 @@ async def damage_detection(payload: DamageDetectionRequest):
                 file_name = f"{uuid.uuid4()}{ext}"
                 file_path = os.path.join(uploads_dir, file_name)
                 download_image(url, file_path, idx)
-                saved[sides[idx]] = file_path
+                saved[DAMAGE_SIDES[idx]] = file_path
 
             result = analyze_phone_images(
                 YOLO_MODEL_PATH,
@@ -320,12 +319,8 @@ async def full_verification(
     pta_approved: bool = Form(True),
 
     # Images
-    front: Optional[UploadFile] = File(None),
-    back: Optional[UploadFile] = File(None),
-    left: Optional[UploadFile] = File(None),
-    right: Optional[UploadFile] = File(None),
-    top: Optional[UploadFile] = File(None),
-    bottom: Optional[UploadFile] = File(None),
+    front: UploadFile = File(...),
+    back: UploadFile = File(...),
 ):
     # -------------------------------
     # Save images
@@ -338,8 +333,8 @@ async def full_verification(
         os.makedirs(uploads_dir, exist_ok=True)
 
         for side, img in {
-            "front": front, "back": back, "left": left,
-            "right": right, "top": top, "bottom": bottom
+            "front": front,
+            "back": back,
         }.items():
             if img:
                 file_id = f"{uuid.uuid4()}.jpg"

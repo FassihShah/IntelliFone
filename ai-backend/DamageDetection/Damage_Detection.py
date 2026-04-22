@@ -33,8 +33,8 @@ DAMAGE_MEASUREMENT = {
 # YOLO class names (must match your trained model)
 CLASS_NAMES = ["crack", "dot", "line"]
 
-# Sides of the phone
-SIDES = ["front", "back", "left", "right", "top", "bottom"]
+# Sides of the phone used by the current verification flow
+SIDES = ["front", "back"]
 
 
 def process_yolo_result(result, side_name):
@@ -62,7 +62,7 @@ def process_yolo_result(result, side_name):
 
 def analyze_phone_images(model_path, side_images, show_output=True, save_output=False, output_dir="outputs"):
     """
-    Runs YOLO segmentation on all VALID phone side images.
+    Runs YOLO segmentation on the provided front/back phone images.
     Displays each result inline with Matplotlib.
     """
     import torch
@@ -109,14 +109,10 @@ def analyze_phone_images(model_path, side_images, show_output=True, save_output=
 
 # Example usage
 if __name__ == "__main__":
-    model_path = "best3.pt"
+    model_path = "best4.pt"
     images = {
         "front": "front.jpg",
         "back": "",
-        "left": "",
-        "right": "",
-        "top": "",
-        "bottom": ""
     }
 
     output = analyze_phone_images(model_path, images)

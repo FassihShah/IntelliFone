@@ -3,11 +3,7 @@ import numpy as np
 
 SIDE_WEIGHTS = {
     "front": 1.0,
-    "back": 0.6,
-    "left": 0.3,
-    "right": 0.3,
-    "top": 0.3,
-    "bottom": 0.3
+    "back": 0.8,
 }
 
 # Severity importance per damage type
@@ -37,12 +33,12 @@ def compute_condition_score(damage_data):
         "panel_line": False
     }
 
-    # Process all detections
+    # Only front/back are used in the scoring flow now.
     for side, side_data in damages.items():
-        if not side_data:
+        if side not in SIDE_WEIGHTS or not side_data:
             continue
 
-        side_weight = SIDE_WEIGHTS.get(side, 0.3)
+        side_weight = SIDE_WEIGHTS[side]
 
         for cls, detections in side_data.items():
             # Detect what damage types exist (boolean flags)
