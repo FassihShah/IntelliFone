@@ -238,6 +238,18 @@ def compute_market_uncertainty(training_df: pd.DataFrame) -> float:
 def compute_dynamic_price_range(base_price: float, uncertainty: float):
     delta = base_price * uncertainty
 
+    # Keep consumer-facing ranges tighter, especially for sub-100k phones.
+    if base_price < 100000:
+        max_total_spread = 10000
+    elif base_price < 150000:
+        max_total_spread = 15000
+    elif base_price < 250000:
+        max_total_spread = 20000
+    else:
+        max_total_spread = 30000
+
+    delta = min(delta, max_total_spread / 2)
+
     min_price = round((base_price - delta) / 500) * 500
     max_price = round((base_price + delta) / 500) * 500
 
