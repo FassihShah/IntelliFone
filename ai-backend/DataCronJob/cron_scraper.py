@@ -16,8 +16,11 @@ client = MongoClient(MONGO_URI)
 
 DB_NAME = "MobileDB"
 COLLECTION_NAME = "mobile_brands"
+STATE_COLLECTION_NAME = "cron_state"
+STATE_DOC_ID = "olx_round_robin"
 db = client[DB_NAME]
 collection = db[COLLECTION_NAME]
+state_collection = db[STATE_COLLECTION_NAME]
 
 
 def get_next_batch(models, start_index, batch_size=5):
@@ -56,23 +59,63 @@ def update_model_index(brand, new_index, models_len):
     return new_index
 
 
+def get_brand_cursor() -> int:
+    state_doc = state_collection.find_one({"_id": STATE_DOC_ID}) or {}
+    return int(state_doc.get("brand_index", 0))
+
+
+def update_brand_cursor(new_index: int):
+    state_collection.update_one(
+        {"_id": STATE_DOC_ID},
+        {"$set": {
+            "brand_index": new_index,
+            "last_updated": datetime.utcnow()
+        }},
+        upsert=True
+    )
+
+
+def get_brand_batch(brands, start_index: int, brands_per_run: int):
+    if not brands:
+        return [], start_index
+
+    start_index = start_index % len(brands)
+    batch_count = min(max(brands_per_run, 1), len(brands))
+
+    selected = [
+        brands[(start_index + offset) % len(brands)]
+        for offset in range(batch_count)
+    ]
+    next_index = (start_index + batch_count) % len(brands)
+    return selected, next_index
+
+
 # ---------------------------
 # MAIN ROUND-ROBIN SCRAPER
 # ---------------------------
 
-def run_round_robin_scraper(batch_size=5):
+def run_round_robin_scraper(batch_size=5, brands_per_run=None):
     ensure_olx_indexes()
 
     print("======================================")
     print("Cron Job Started:", datetime.now())
     print("======================================")
 
-    brands = list(collection.find({}))
+    brands = list(collection.find({}).sort("brand", 1))
     if not brands:
         print("No brands found in DB.")
         sys.exit(0)
 
-    for brand_doc in brands:
+    if brands_per_run is None:
+        brands_per_run = int(os.getenv("OLX_BRANDS_PER_RUN", "3"))
+
+    start_brand_index = get_brand_cursor()
+    selected_brands, next_brand_index = get_brand_batch(brands, start_brand_index, brands_per_run)
+
+    print(f"Starting at brand_index: {start_brand_index}")
+    print(f"Brands in this run ({len(selected_brands)}): {[brand_doc['brand'] for brand_doc in selected_brands]}")
+
+    for brand_doc in selected_brands:
         brand = brand_doc["brand"]
         models = brand_doc["models"]
 
@@ -100,6 +143,9 @@ def run_round_robin_scraper(batch_size=5):
 
             saved_index = update_model_index(brand, next_model_index, len(models))
             print(f"Updated model_index -> {brand}: {saved_index}")
+
+    update_brand_cursor(next_brand_index)
+    print(f"\nUpdated global brand_index -> {next_brand_index}")
 
     print("\n======================================")
     print("Cron Job Finished:", datetime.now())
