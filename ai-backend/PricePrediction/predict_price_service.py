@@ -35,7 +35,7 @@ def ensure_price_prediction_indexes():
 
 RECENT_LISTINGS_DAYS = 60
 MIN_RECENT_LISTINGS = 50
-MIN_TRAINING_LISTINGS = 20
+MIN_TRAINING_LISTINGS = 10
 
 
 def normalize_phone_text(value: str | None, brand: str | None = None) -> str:
