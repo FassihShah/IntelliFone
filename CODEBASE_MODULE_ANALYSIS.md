@@ -2,7 +2,7 @@
 
 ## Scope
 
-This document explains the current IntelliFone repository as it exists now, with special attention to the updated AI backend pipelines.
+This document explains the current IntelliFone repository as it exists now, with special attention to the updated AI backend pipelines and the research-paper context provided in `IntelliFone_Research_Paper_v2.docx`.
 
 It covers:
 
@@ -13,7 +13,35 @@ It covers:
 - Which environment variables and external services are required
 - Current limitations and operational notes
 
-The real backend code lives under `ai-backend/`. There are older root-level duplicate backend files in folders such as `DataCronJob/`, `PricePrediction/`, and `RecommendationEngine/`; those are not the active tracked backend and should not be used for development.
+The real backend code lives under `ai-backend/`. In the current tracked tree, backend folders such as `DataCronJob/`, `PricePrediction/`, `RecommendationEngine/`, `DamageDetection/`, `ConditionScoring/`, `ReportGenerator/`, `SpecsFetcher/`, and `ChatBot/` are under `ai-backend/`.
+
+## Research Paper Context
+
+The supplied research paper frames IntelliFone as a final-year project and research system for objective used-smartphone verification. Its central claims and design goals are:
+
+- Detect phone damage from marketplace-style images using YOLO segmentation.
+- Score condition on a `0-20` scale using survey-calibrated weights.
+- Predict fair resale prices in Pakistani rupees from live OLX market data.
+- Recommend phones from YouTube reviewer content.
+- Provide both web and mobile client experiences.
+
+Important paper details:
+
+| Area | Paper Summary |
+| --- | --- |
+| Dataset | Real-world phone images collected from OLX Pakistan and Facebook Marketplace, annotated through multiple dataset versions in Roboflow |
+| Damage classes | crack, line, dot |
+| Model family | YOLOv11-seg as the main model family, with YOLOv8-seg and exploratory YOLOv26-seg comparisons |
+| Best reported model | final YOLOv11-seg model on the v6 dataset, reported as overall mAP@50 around `0.640`, with stronger dot-class performance and weaker crack detection |
+| Condition scoring | buyer/dealer survey calibrated; paper mentions Lahore markets and Google Form responses |
+| Pricing | Random Forest model trained from OLX used-phone listings |
+| Recommendation | YouTube review/transcript pipeline for budget and priority-based recommendations |
+
+Code-versus-paper note:
+
+- The current backend code implements the active verification flow with exactly two images: `front` and `back`.
+- The paper discusses broader multi-view capture and sensor/battery diagnostics. Those are product/research scope items, but the current checked-in backend verification code does not expose sensor diagnostics or battery health endpoints.
+- The paper mentions Whisper/spaCy in the recommendation narrative, while the current code uses `youtube_transcript_api`, `deep_translator`, and DeepSeek/LangChain for transcript extraction and recommendation data processing.
 
 ## High-Level Architecture
 
@@ -86,6 +114,7 @@ The backend reads these variables from `ai-backend/.env`:
 | `SUPABASE_SERVICE_ROLE_KEY` | Damage report upload |
 | `SUPABASE_REPORTS_BUCKET` | Optional; defaults to `phone-reports` |
 | `SUPABASE_REPORTS_FOLDER` | Optional; defaults to `damage_reports` |
+| `SERPAPI_API_KEY` | GSMArena lookup in `SpecsFetcher/specs_service.py` when specs are not cached |
 | `ALLOWED_ORIGINS` | Optional comma-separated frontend origins for FastAPI CORS |
 | `MAX_IMAGE_BYTES` | Optional max image upload/download size; defaults to 10 MB |
 
@@ -99,6 +128,7 @@ The FastAPI app exposes these routes:
 | --- | --- | --- |
 | `GET /` | Basic welcome route | none |
 | `GET /health` | Lightweight deployment health check | none |
+| `POST /mobile-specs/` | Fetch and cache GSMArena specifications for a brand/model | `SpecsFetcher` |
 | `POST /damage-detection/` | Download image URLs, run YOLO, create report, score condition | `DamageDetection`, `report_generator`, `ConditionScoring` |
 | `POST /condition-scoring/` | Score damage JSON directly | `ConditionScoring` |
 | `POST /price-prediction/` | Predict used phone price range | `PricePrediction` |
@@ -117,6 +147,8 @@ Startup checks require:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `ai-backend/best4.pt`
+
+`main.py` startup prepares indexes for price prediction, recommendations, and the specs cache. `main_api.py` prepares price prediction and specs-cache indexes.
 
 The YOLO import is lazy-loaded inside the damage detection function so the FastAPI app can import cleanly without immediately initializing Ultralytics.
 
@@ -148,8 +180,8 @@ There are two FastAPI entrypoint files:
 
 | File | Role | Important Difference |
 | --- | --- | --- |
-| `ai-backend/main.py` | Full AI backend | Includes damage detection, condition scoring, price prediction, recommendations, streaming recommendations, chatbot, streaming chatbot, and conversation list endpoints |
-| `ai-backend/main_api.py` | Smaller API variant | Includes damage detection, condition scoring, price prediction, and full verification, but does not include chatbot or recommendation routes |
+| `ai-backend/main.py` | Full AI backend | Includes mobile specs, damage detection, condition scoring, price prediction, recommendations, streaming recommendations, chatbot, streaming chatbot, and conversation list endpoints |
+| `ai-backend/main_api.py` | Smaller API variant | Includes mobile specs, damage detection, condition scoring, price prediction, and full verification, but does not include chatbot or recommendation routes |
 
 Current Docker behavior:
 
@@ -159,9 +191,8 @@ Current Docker behavior:
 
 Dependency-file note:
 
-- `README.md` says the Docker image installs `requirements.ai-backend.txt`.
 - The current Dockerfile copies and installs `requirements.txt`.
-- Keep these aligned before deployment so the local and container runtime dependencies do not drift.
+- `requirements.ai-backend.txt` also exists. Keep local setup, README instructions, and Docker dependency installation aligned before deployment so runtime dependencies do not drift.
 
 ## Shared Python Models
 
@@ -199,13 +230,90 @@ These structure the MongoDB-backed AI assistant chat endpoints.
 - `ai-backend/models.py`
 - `ai-backend/DataCronJob/models.py`
 
-It models new-phone specification data such as OS, release year, cameras, chipset, network, sensors, dimensions, and price. The current runtime code does not actively use this schema in the API routes, OLX scraper, recommendation engine, or chatbot. It is a future-ready model for a possible new-phone specification catalog.
+It models new-phone specification data such as OS, release year, cameras, chipset, network, sensors, dimensions, and price. The current `SpecsFetcher` endpoint uses this schema for GSMArena responses and MongoDB cache records.
 
 The duplicate `DataCronJob/models.py` should be treated carefully:
 
 - It repeats `UsedMobile` and `NewMobile`.
 - The active scraper imports `UsedMobile` from root `models.py`, not from `DataCronJob/models.py`.
 - If schemas change later, update or remove the duplicate to avoid silent drift.
+
+## Mobile Specs Fetcher
+
+Primary file: `ai-backend/SpecsFetcher/specs_service.py`
+
+Purpose:
+
+Fetch structured phone specifications from GSMArena and cache them in MongoDB.
+
+FastAPI endpoint:
+
+- `POST /mobile-specs/`
+
+Input model:
+
+```json
+{
+  "brand": "Samsung",
+  "model": "Galaxy S21",
+  "refresh": false
+}
+```
+
+Output model:
+
+```json
+{
+  "brand": "Samsung",
+  "model": "Galaxy S21",
+  "gsmarena_url": "https://www.gsmarena.com/...",
+  "specs": {
+    "ram": "8GB",
+    "storage": "128GB, 256GB",
+    "os": "...",
+    "release_year": 2021,
+    "screen_size": "...",
+    "battery_capacity": "...",
+    "main_camera": "...",
+    "chipset": "..."
+  },
+  "cached": false,
+  "updated_at": "..."
+}
+```
+
+MongoDB collection:
+
+- database: `MobileDB`
+- collection: `mobile_specs`
+
+Indexes:
+
+```python
+specs_collection.create_index([("normalized_key", 1)], unique=True)
+specs_collection.create_index([("brand", 1), ("model", 1)])
+specs_collection.create_index([("updated_at", -1)])
+```
+
+Flow:
+
+1. Normalize brand/model into a cache key.
+2. Return cached specs unless `refresh=true`.
+3. Use SerpApi Google search to find the GSMArena page.
+4. Scrape the GSMArena specs table with BeautifulSoup.
+5. Convert table fields into the shared `NewMobile` schema.
+6. Upsert the cached result into MongoDB.
+
+Environment:
+
+- `MONGO_CONNECTION_STRING`
+- `SERPAPI_API_KEY`
+
+Important issue:
+
+- `specs_service.py` currently ends with `print(fetch_mobile_specs("Samsung", "Galaxy S21"))`.
+- Because `main.py` and `main_api.py` import this module, that line can trigger an external SerpApi/GSMArena request at import/startup time.
+- Guard it with `if __name__ == "__main__":` or remove it before deployment.
 
 ## Damage Detection Pipeline
 
@@ -214,6 +322,12 @@ Primary file: `ai-backend/DamageDetection/Damage_Detection.py`
 Purpose:
 
 Detect physical damage from phone images using a YOLO segmentation model.
+
+Research context:
+
+- The research paper describes a real-world marketplace dataset collected from OLX Pakistan and Facebook Marketplace, annotated through multiple Roboflow dataset versions.
+- The paper reports YOLOv11-seg as the main model family and discusses YOLOv8-seg and exploratory YOLOv26-seg comparisons.
+- The checked-in runtime model file is `ai-backend/best4.pt`; the code treats it as an Ultralytics segmentation model and does not encode the training experiment metadata directly.
 
 Inputs:
 
@@ -266,6 +380,12 @@ Primary file: `ai-backend/ConditionScoring/condition_scoring.py`
 Purpose:
 
 Convert raw detected damage into a numeric condition score and boolean AI damage flags.
+
+Research context:
+
+- The paper describes a buyer/dealer survey calibrated scoring scheme and labels scores as Excellent, Good, Fair, and Poor.
+- The current code implements a compact logarithmic penalty formula rather than a trained regression model.
+- Current code weights only `front` and `back`; broader side weights from the paper are not active in `condition_scoring.py`.
 
 Flow:
 
@@ -661,10 +781,10 @@ Each channel also has a configurable trust weight:
 
 ```python
 CHANNEL_WEIGHTS = {
-    "Babloo Lahori": 1.0,
-    "ReviewsPK": 1.0,
-    "VideoWaliSarkar": 1.0,
-    "MAS TECH": 1.0
+    "Babloo Lahori": 1.2,
+    "ReviewsPK": 0.9,
+    "VideoWaliSarkar": 0.9,
+    "MAS TECH": 0.8
 }
 ```
 
@@ -686,6 +806,11 @@ The watcher:
 ### Transcript Processing
 
 File: `recommender_data_service.py`
+
+Implementation note:
+
+- The research paper describes the recommendation pipeline at a higher level as YouTube/NLP and references Whisper/spaCy concepts.
+- The current code does not call Whisper or spaCy. It uses `youtube_transcript_api` for available captions/transcripts, `deep_translator` for non-English transcript chunks, and DeepSeek through LangChain for extraction.
 
 `fetch_transcript(video_id)`:
 
@@ -1630,7 +1755,8 @@ Important difference:
 ### Deployment/Operations
 
 - Docker starts `main_api:app`, not `main:app`, so chatbot and recommendations are missing in that deployment mode.
-- Dockerfile uses `requirements.txt`, while docs mention `requirements.ai-backend.txt`.
+- Dockerfile uses `requirements.txt`; keep this aligned with local setup docs and `requirements.ai-backend.txt` if the slimmer dependency file is intended to be authoritative.
+- `SpecsFetcher/specs_service.py` performs a demo `fetch_mobile_specs()` call at import time; this can fail startup or burn SerpApi quota and should be guarded or removed.
 - The frontend should use an environment variable for AI backend base URL.
 - Add startup or health diagnostics that confirm MongoDB, Supabase report bucket, and DeepSeek configuration separately from the lightweight `/health`.
 - Add structured logging for scraper runs, LLM extraction failures, and price prediction record counts.
@@ -1650,6 +1776,7 @@ Important difference:
   - `messages.conversation_id`
   - `messages.created_at`
 - Add retry/backoff around DeepSeek calls in scraping, recommendations, and chatbot.
+- Add retry/backoff and cache expiry policy around GSMArena specs fetching.
 - Add a background job queue for expensive damage detection and report generation if uploads become slow.
 - Add per-request IDs across frontend, FastAPI, and cron logs for easier debugging.
 
@@ -1702,7 +1829,7 @@ Important difference:
 ## Active Development Notes
 
 - Use only files under `ai-backend/` for backend development.
-- Root-level duplicate backend files are old untracked copies and do not contain the recent changes.
+- The current tracked backend modules are under `ai-backend/`; do not recreate or develop against root-level duplicate backend folders.
 - The lean backend venv is under `ai-backend/.venv/`.
 - `ai-backend/requirements.ai-backend.txt` contains the slimmer runtime dependency list for the backend.
 - `ai-backend/Dockerfile` currently installs `requirements.txt` and starts `main_api:app` with Uvicorn.

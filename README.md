@@ -1,78 +1,73 @@
 # IntelliFone
 
-IntelliFone is a smartphone marketplace and AI verification system for the Pakistani used-phone market. It combines a Next.js web app, a FastAPI AI backend, MongoDB-backed market datasets, Supabase storage/auth, YOLO damage detection, DeepSeek LLM extraction, OLX scraping, price prediction, and YouTube-based recommendations.
+IntelliFone is an AI-powered used-smartphone marketplace for Pakistan. It combines a Next.js web marketplace with a FastAPI AI backend that verifies phone condition from images, generates damage reports, predicts fair resale price ranges from live OLX data, recommends phones from YouTube review content, and provides a smartphone-focused AI assistant.
 
-## What It Does
+The project is also documented as a final-year research system: the research paper describes a YOLOv11-seg damage-detection pipeline trained on iteratively expanded marketplace image datasets, survey-calibrated condition scoring, an OLX-backed Random Forest pricing model, and a YouTube-review recommendation engine.
 
-- Lets sellers list used phones with images and verification data.
-- Detects visible damage from phone images using a YOLO segmentation model.
-- Converts damage into a 0-20 condition score.
-- Predicts used-phone price ranges from scraped OLX Pakistan listings.
-- Recommends phones from YouTube review data based on budget and priority.
-- Provides a smartphone-focused AI chatbot.
+## Core Capabilities
+
+- Seller listings with Supabase auth, profiles, image storage, and marketplace data.
+- AI damage detection on required front/back phone images using a YOLO segmentation model.
+- Condition scoring on a `0-20` scale with AI flags for screen cracks, panel dots, and panel lines.
+- Branded PDF damage reports uploaded to Supabase Storage.
+- Used-phone price prediction from MongoDB OLX market listings.
+- GSMArena specification lookup and MongoDB caching through the specs fetcher.
+- Buyer/seller chat backed by Supabase data and Pusher realtime events.
+- AI assistant and recommendation flows powered by DeepSeek-compatible OpenAI clients.
+- YouTube transcript ingestion for budget/priority phone recommendations.
 
 ## Repository Layout
 
 ```text
 IntelliFone/
-  web/                         Next.js frontend
+  README.md
+  CODEBASE_MODULE_ANALYSIS.md
+  web/                         Next.js 16 web marketplace
   ai-backend/                  FastAPI AI/ML backend
-    main.py                    API entrypoint
+    main.py                    full API: verification, specs, recommendations, chat
+    main_api.py                smaller API: verification, specs, price prediction
     models.py                  shared Pydantic models
-    Dockerfile                 API-only Docker image
-    requirements.ai-backend.txt
-    DamageDetection/           YOLO inference
-    ConditionScoring/          damage-to-score logic
-    PricePrediction/           OLX-based price prediction
-    RecommendationEngine/      recommendation endpoint logic
+    Dockerfile                 container starts main_api:app
+    best4.pt                   YOLO model file
+    DamageDetection/           YOLO segmentation inference
+    ConditionScoring/          damage-to-condition scoring
+    ReportGenerator/           PDF report generation and Supabase upload
+    PricePrediction/           OLX-backed Random Forest pricing
+    RecommendationEngine/      DeepSeek recommendation ranking
+    SpecsFetcher/              GSMArena lookup/cache service
     DataCronJob/               OLX and YouTube scheduled jobs
     ChatBot/                   MongoDB-backed AI assistant
-  CODEBASE_MODULE_ANALYSIS.md  detailed module-by-module architecture
 ```
 
-Use the files under `ai-backend/` for backend development. Any old root-level duplicate backend folders, if present, are not the active backend.
+Use `ai-backend/` for backend development. The active repository no longer has active root-level backend folders outside `ai-backend/`.
 
-## Main Architecture
+## Architecture
 
 ```text
-Frontend web app
-  -> Supabase for auth, marketplace data, image storage
-  -> FastAPI ai-backend for AI verification, price prediction, recommendations, chatbot
+Web client on Vercel
+  -> Supabase Auth, Database, and Storage
+  -> Next.js API routes for marketplace/chat proxies
+  -> FastAPI AI backend endpoints
 
-FastAPI ai-backend
-  -> MongoDB for OLX listings, YouTube recommendation data, chatbot history
-  -> Supabase Storage for generated damage reports
-  -> DeepSeek for LLM extraction, classification, recommendations, chatbot replies
-  -> ScrapingBee for OLX Pakistan proxy fetching when configured
+FastAPI AI backend
+  -> YOLO damage detection and PDF report generation
+  -> Random Forest price prediction from MongoDB used-phone listings
+  -> DeepSeek LLM calls for scraping, recommendations, and AI chat
+  -> GSMArena specs lookup through SerpApi
 
-Separate cron jobs
+Background jobs
   -> OLX scraper writes used_mobiles into MongoDB
-  -> YouTube watcher writes videos and phones into MongoDB
+  -> YouTube watcher writes videos and recommendation phones into MongoDB
 ```
 
-## AI Backend Features
+Current deployment notes from the codebase:
 
-| Module | Purpose |
-| --- | --- |
-| `DamageDetection` | Runs YOLO on phone images and returns detected cracks, dots, and lines |
-| `ConditionScoring` | Converts damage JSON into a condition score and AI damage flags |
-| `PricePrediction` | Trains a Random Forest from matching OLX listings and predicts price range |
-| `DataCronJob/olx_scraper_service.py` | Scrapes OLX listings with ScrapingBee-first, direct-fetch fallback |
-| `DataCronJob/cron_scraper.py` | Round-robin scheduled OLX scraper by brand/model |
-| `DataCronJob/youtube_watcher_service.py` | Monitors YouTube channels for list-style phone recommendation videos |
-| `DataCronJob/recommender_data_service.py` | Extracts phone recommendations from transcripts |
-| `RecommendationEngine` | Ranks candidate phones for budget/priority requests |
-| `ChatBot` | Smartphone-focused assistant with MongoDB conversation history |
+- `main.py` exposes the full backend, including chat and recommendations.
+- `main_api.py` exposes verification, specs, and price prediction only.
+- `ai-backend/Dockerfile` currently starts `main_api:app`, so Docker deployments do not expose chat or recommendation routes unless changed.
+- Web proxy routes currently hardcode `http://127.0.0.1:8000`; production should replace this with environment-based backend URLs.
 
-## Required Services
-
-- MongoDB Atlas or local MongoDB
-- Supabase project with Storage bucket for reports
-- DeepSeek API key
-- YouTube Data API key for the YouTube watcher
-- ScrapingBee API key if OLX needs Pakistan proxy access
-
-## AI Backend Environment
+## Backend Environment
 
 Create `ai-backend/.env`:
 
@@ -88,6 +83,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 SUPABASE_REPORTS_BUCKET=phone-reports
 SUPABASE_REPORTS_FOLDER=damage_reports
 
+SERPAPI_API_KEY=your_serpapi_key
 YOUTUBE_API_KEY=your_youtube_api_key
 SCRAPINGBEE_API_KEY=your_scrapingbee_key
 
@@ -95,122 +91,21 @@ ALLOWED_ORIGINS=http://localhost:3000
 MAX_IMAGE_BYTES=10485760
 ```
 
-Notes:
+`SCRAPINGBEE_API_KEY` is optional for OLX scraping but useful for Pakistan proxy access. `SERPAPI_API_KEY` is required by `/mobile-specs/` when a cached GSMArena result is not already available.
 
-- `SCRAPINGBEE_API_KEY` is optional, but useful for OLX Pakistan.
-- `DEEPSEEK_MODEL` defaults to `deepseek-chat`.
-- `DEEPSEEK_BASE_URL` defaults to `https://api.deepseek.com`.
-- `ALLOWED_ORIGINS` is comma-separated for deployment, for example:
+## Run Locally
 
-```env
-ALLOWED_ORIGINS=https://your-frontend.vercel.app,http://localhost:3000
-```
-
-## Run AI Backend Locally
+Backend:
 
 ```powershell
 cd ai-backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.ai-backend.txt
+pip install -r requirements.txt
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Open:
-
-- API root: `http://localhost:8000/`
-- Health check: `http://localhost:8000/health`
-- FastAPI docs: `http://localhost:8000/docs`
-
-## Run Cron Jobs Separately
-
-Cron jobs are intentionally separate from the FastAPI API process. Do not run them inside `main.py` or inside the web server process.
-
-OLX scraper:
-
-```powershell
-cd ai-backend
-.\.venv\Scripts\python.exe DataCronJob\cron_scraper.py
-```
-
-YouTube watcher:
-
-```powershell
-cd ai-backend
-.\.venv\Scripts\python.exe DataCronJob\youtube_watcher_service.py
-```
-
-Suggested deployment schedules:
-
-| Job | Command | Suggested Frequency |
-| --- | --- | --- |
-| OLX scraper | `python DataCronJob/cron_scraper.py` | every 6-12 hours or daily |
-| YouTube watcher | `python DataCronJob/youtube_watcher_service.py` | every 6-12 hours or daily |
-
-For free/cheap cron hosting, GitHub Actions is usually enough. For more reliable scheduled jobs, use Render Cron Jobs or a small VPS cron/systemd timer.
-
-## Docker
-
-The Dockerfile builds the API service only.
-
-```powershell
-cd ai-backend
-docker build -t intellifone-ai-backend .
-docker run --env-file .env -p 8000:8000 intellifone-ai-backend
-```
-
-The Docker image installs `requirements.ai-backend.txt` and starts:
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
-
-Deploy cron jobs as separate scheduled commands or separate services.
-
-## Main API Endpoints
-
-| Endpoint | Method | Purpose |
-| --- | --- | --- |
-| `/` | GET | Welcome response |
-| `/health` | GET | Lightweight health check |
-| `/damage-detection/` | POST | Download image URLs, run YOLO, create PDF report, return condition score |
-| `/condition-scoring/` | POST | Score existing damage JSON |
-| `/price-prediction/` | POST | Predict price range from phone details and condition |
-| `/full-verification/` | POST | Upload images, detect damage, score condition, predict price |
-| `/recommend/` | GET | Recommend phones by budget and priority |
-| `/chat` | POST | Smartphone AI assistant |
-| `/chat/{conversation_id}` | GET | Fetch saved assistant chat history |
-
-## Current Backend Hardening
-
-- OLX scraper test execution is commented, so imports do not start scraping.
-- Cron jobs run separately from the API deployment.
-- MongoDB index creation is explicit and wrapped in safe setup functions.
-- API startup prepares only API-needed indexes.
-- OLX and YouTube cron scripts prepare their own indexes before running.
-- Damage detection uses per-request temporary folders.
-- Image uploads/downloads have content-type and size checks.
-- FastAPI CORS is controlled by `ALLOWED_ORIGINS`.
-- `/health` exists for deployment health checks.
-
-## Data Retention
-
-OLX pricing data:
-
-- Stored in `MobileDB.used_mobiles`.
-- Older listings are intentionally preserved.
-- Price prediction uses latest 60-day listings first, then older listings if recent data is too small.
-
-YouTube recommendation data:
-
-- Stored in `MobileDB.phones` and `MobileDB.videos`.
-- Phone recommendation records expire after 60 days because recommendation content gets stale.
-
-## Frontend
-
-The frontend lives in `web/`.
-
-Typical local setup:
+Frontend:
 
 ```powershell
 cd web
@@ -218,29 +113,71 @@ npm install
 npm run dev
 ```
 
-Set the frontend AI backend URL to the FastAPI deployment/local URL according to the frontend environment variables used in `web/`.
+Useful backend URLs:
 
-## Deployment Recommendation
+- API root: `http://localhost:8000/`
+- Health check: `http://localhost:8000/health`
+- FastAPI docs: `http://localhost:8000/docs`
+- Web app: `http://localhost:3000`
 
-Cheapest practical split:
+## Main FastAPI Endpoints
 
-```text
-Frontend: Vercel
-AI API: Koyeb free, Render free/starter, Railway hobby, or small VPS
-Database: MongoDB Atlas M0 to start
-Cron jobs: GitHub Actions free or Render Cron Jobs
-Reports/images: Supabase Storage
+| Endpoint | Method | Available In | Purpose |
+| --- | --- | --- | --- |
+| `/` | GET | `main.py`, `main_api.py` | Welcome response |
+| `/health` | GET | `main.py`, `main_api.py` | Lightweight health check |
+| `/mobile-specs/` | POST | `main.py`, `main_api.py` | Fetch/cache GSMArena specs |
+| `/damage-detection/` | POST | `main.py`, `main_api.py` | Run YOLO on front/back image URLs and return score/report data |
+| `/condition-scoring/` | POST | `main.py`, `main_api.py` | Score existing damage JSON |
+| `/price-prediction/` | POST | `main.py`, `main_api.py` | Predict used phone price range |
+| `/full-verification/` | POST | `main.py`, `main_api.py` | Upload images, detect damage, score condition, predict price |
+| `/recommend/` | GET | `main.py` | Non-streaming recommendations |
+| `/recommend-stream/` | GET | `main.py` | Streaming recommendations |
+| `/chat` | POST | `main.py` | Non-streaming AI assistant |
+| `/chat-stream` | POST | `main.py` | Streaming AI assistant |
+| `/chat/{conversation_id}` | GET | `main.py` | Fetch assistant chat history |
+| `/conversations/{user_id}` | GET | `main.py` | List assistant conversations for a user |
+
+## Background Jobs
+
+Run these separately from the API process.
+
+```powershell
+cd ai-backend
+.\.venv\Scripts\python.exe DataCronJob\cron_scraper.py
+.\.venv\Scripts\python.exe DataCronJob\youtube_watcher_service.py
 ```
 
-For a more stable low-cost setup:
+Suggested scheduling:
 
-```text
-Frontend: Vercel
-AI API: Render Starter / Railway Hobby / small VPS
-Cron jobs: Render Cron Jobs or VPS cron
-MongoDB: Atlas M0 first, upgrade when storage/traffic grows
+| Job | Purpose | Suggested Schedule |
+| --- | --- | --- |
+| `DataCronJob/cron_scraper.py` | Round-robin OLX listing ingestion by brand/model | Daily or every 6-12 hours |
+| `DataCronJob/youtube_watcher_service.py` | YouTube video classification and transcript extraction | Weekly or daily depending on quota |
+
+## Docker
+
+```powershell
+cd ai-backend
+docker build -t intellifone-ai-backend .
+docker run --env-file .env -p 8000:8000 intellifone-ai-backend
 ```
 
-## More Details
+Current Docker behavior:
 
-Read `CODEBASE_MODULE_ANALYSIS.md` for the full module-by-module explanation of how the scraper, price prediction, damage detection, recommendation engine, and chatbot work.
+- Installs `requirements.txt`.
+- Starts `uvicorn main_api:app --host 0.0.0.0 --port 8000`.
+- Does not expose chat or recommendation endpoints unless the command is changed to `main:app` or `main_api.py` is expanded.
+
+## Important Implementation Notes
+
+- The active damage flow requires exactly two images in this order: `front`, `back`.
+- Damage detection writes per-request temporary files, which avoids cross-request collisions.
+- Condition scoring currently weights `front` as `1.0` and `back` as `0.8`, then applies logarithmic penalties by damage type.
+- The research paper mentions broader six-view capture, sensor diagnostics, and battery health; those are product/research concepts, while the current backend verification code uses the front/back image workflow.
+- `SpecsFetcher/specs_service.py` currently contains a demo `print(fetch_mobile_specs("Samsung", "Galaxy S21"))` at import time. Remove or guard it before production deployment because it can trigger external requests during API startup.
+- `web/app/api/phones/add/route.ts` expects `pdf_path`, while FastAPI returns `pdf_url`. This contract needs alignment before relying on listing verification end-to-end.
+
+## More Detail
+
+Read `CODEBASE_MODULE_ANALYSIS.md` for the full module-by-module explanation, current risks, and improvement roadmap.
