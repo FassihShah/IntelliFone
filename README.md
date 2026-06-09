@@ -41,6 +41,28 @@ IntelliFone/
 
 Use `ai-backend/` for backend development. The active repository no longer has active root-level backend folders outside `ai-backend/`.
 
+## UI Screenshots
+
+<img width="1600" height="744" alt="image 2" src="https://github.com/user-attachments/assets/1f81dcd2-a567-4bcd-abb6-ae4a95ac18e9" />
+
+--
+
+<img width="1600" height="801" alt="image 3" src="https://github.com/user-attachments/assets/e9db2842-4094-4735-a3b3-15a3d2f27a7d" />
+
+--
+
+<img width="1600" height="789" alt="image 4" src="https://github.com/user-attachments/assets/eb070aab-e9e4-47c6-ae11-64285e8ecf41" />
+
+--
+
+<img width="1600" height="777" alt="image1" src="https://github.com/user-attachments/assets/e5586c55-f257-48ff-881a-95ff58335372" />
+
+--
+
+<img width="1600" height="733" alt="image 5" src="https://github.com/user-attachments/assets/02f1ebc3-714f-480d-9c64-5a5b3e84c83d" />
+
+---
+
 ## Architecture
 
 ```text
